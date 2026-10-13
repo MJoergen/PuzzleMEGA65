@@ -2,10 +2,10 @@
 -- (bcd_o, G_DIGITS digits of 4 bits, the lowest digit in the lowest bits),
 -- with the double dabble algorithm: one bit per clock cycle, so it takes
 -- G_BITS clock cycles after start_i, and then done_o is high for one clock
--- cycle. In each clock cycle, every digit that is 5 or more gets 3 added, and
--- then the digits and the remaining bits of the number are shifted left by
--- one bit. G_DIGITS must be large enough for the number, i.e.
--- 10**G_DIGITS >= 2**G_BITS.
+-- cycle. A start during a conversion starts a new one. In each clock cycle,
+-- every digit that is 5 or more gets 3 added, and then the digits and the
+-- remaining bits of the number are shifted left by one bit. G_DIGITS must be
+-- large enough for the number, i.e. 10**G_DIGITS >= 2**G_BITS.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -58,10 +58,12 @@ begin
             end if;
          end if;
 
+         -- A start also stops a conversion, without done_o
          if start_i = '1' then
-            bin_r <= bin_i;
-            bcd_r <= (others => '0');
-            cnt_r <= G_BITS;
+            bin_r  <= bin_i;
+            bcd_r  <= (others => '0');
+            cnt_r  <= G_BITS;
+            done_r <= '0';
          end if;
       end if;
    end process p_bcd;

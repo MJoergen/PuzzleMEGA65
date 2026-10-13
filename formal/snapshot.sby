@@ -1,0 +1,28 @@
+## Formal verification of snapshot.vhd, see snapshot.psl. The puzzle, the
+## frames, and the solver are free.
+##
+## Run one task:   sby --yosys "yosys -m ghdl" -f snapshot.sby prove
+## Run everything: sby --yosys "yosys -m ghdl" -f snapshot.sby
+
+[tasks]
+cover
+prove
+
+[options]
+cover: mode cover
+cover: depth 40
+prove: mode prove
+prove: depth 4
+
+[engines]
+smtbmc
+
+[script]
+ghdl --std=08 util_pkg.vhd puzzle_pkg.vhd snapshot.vhd snapshot.psl -e snapshot
+prep -top snapshot
+
+[files]
+snapshot.psl
+../src/util_pkg.vhd
+../src/main/puzzle_pkg.vhd
+../src/main/snapshot.vhd

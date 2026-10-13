@@ -293,3 +293,38 @@ of 8 bits instead of one long carry chain.
   partial 16x16 with many empty squares, a partial 1x27) with render.py. All
   pixels are equal (after fixing a missing stage for the read latency of the
   board memory).
+
+## 8. The whole design, the first builds, tests, and formal proofs
+
+* VGA clock domain: `status.vhd` writes the text (80x32 characters,
+  Spleen 16x32 font, full ASCII) into the text memory once per frame during
+  the vertical blanking; `text.vhd` draws it over the board; `vga.vhd` takes
+  the statistics at the start of the vertical blanking and sends the frame
+  pulse to the MAIN domain. `core.vhd` holds both domains and the crossings
+  (cdc_data for the commands, the frames, and the statistics; a dual clock
+  block RAM with two buffers for the board picture).
+* Top levels for MEGA65 R3/R6 (keyboard in the VGA domain, `keys.vhd`) and
+  the Nexys 4 DDR (`buttons.vhd`, 1280x1024 too, 4 bits per colour).
+  Engines per puzzle: MEGA65 (16, 8, 8, 4, 2, 1, 1, 1, 2), Nexys
+  (4, 2, 2, 1, 1, 1, 1, 1, 1). MAIN clock: MEGA65 227.37 MHz (1080/4.75),
+  Nexys 180 MHz.
+* First MEGA65 R6 build: 71.5k LUTs (53 %), 86.5k registers, placement 6
+  minutes, WNS -9.5 ns. The cause was `(disp_r + 1) mod num_ctx(puzzle_r)`
+  in control.vhd (a divider by a value that depends on the puzzle). Fixed
+  with a compare. Also: the engine results are registered in the solver
+  before they are summed, and the halt uses an OR of the solutions of all the
+  engines of all the puzzles (no multiplexer). Second build in progress: WNS
+  -1.8 ns after placement, -1.3 ns after phys_opt.
+* Simulation speed of the whole design: an idle engine still cost a lot in
+  GHDL. Engines in reset now do nothing in simulation, and a stage without a
+  pass is not computed in simulation (a `translate_off` constant C_SIM; the
+  synthesized logic is unchanged). core_tb runs the MAIN clock at 54 MHz.
+* Testbenches, all passing: engine_tb (2 min), board_tb (every pixel of 3
+  frames), core_tb (modes, counts, statistics, and the text on the screen,
+  about 6 min), status_tb (the formatting), bcd_tb, cdc_data_tb (both
+  directions, both boards), keys_tb, buttons_tb.
+* Formal (SymbiYosys), proven by k-induction: control.vhd (the modes, the
+  halt after a solution, credits, the shown context), cdc_data.vhd (two free
+  clocks; a wrapper registers the inputs in the source domain), bcd.vhd
+  (correct digits for every 10-bit number). The proof of bcd found a small
+  bug: a start in the last cycle of a conversion gave done_o; fixed.

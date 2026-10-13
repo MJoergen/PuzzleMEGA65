@@ -1,0 +1,67 @@
+-- The properties of bcd.vhd, the conversion to decimal: for every number
+-- (G_BITS bits), the digits are right when done_o comes, and done_o comes
+-- G_BITS clock cycles after start_i (also when a new start interrupts a
+-- conversion).
+
+vunit i_bcd(bcd(rtl))
+{
+   -- The number of the last start, and the clock cycles since then
+   signal f_bin   : std_logic_vector(G_BITS-1 downto 0);
+   signal f_age   : natural range 0 to G_BITS+1 := G_BITS+1;
+
+   type f_digits_t is array (0 to G_DIGITS-1) of natural range 0 to 9;
+   signal f_digit : f_digits_t;
+
+   -- set all declarations to run on clk_i
+   default clock is rising_edge(clk_i);
+
+   p_start : process (clk_i)
+   begin
+      if rising_edge(clk_i) then
+         if f_age <= G_BITS then
+            f_age <= f_age + 1;
+         end if;
+         if start_i = '1' then
+            f_bin <= bin_i;
+            f_age <= 0;
+         end if;
+      end if;
+   end process p_start;
+
+   -- The digits of the number
+   f_digits_gen : for d in 0 to G_DIGITS-1 generate
+      f_digit(d) <= (to_integer(f_bin) / 10**d) mod 10;
+   end generate f_digits_gen;
+
+
+   -----------------------------
+   -- ASSERTIONS
+   -----------------------------
+
+   -- done_o comes G_BITS clock cycles after the start (f_age counts from 0
+   -- in the clock cycle after the start)
+   f_done : assert always {done_o} |-> {f_age = G_BITS};
+   f_when : assert always {f_age = G_BITS-1 and start_i = '0'} |=> {done_o};
+
+   -- The digits
+   f_digits_ok_gen : for d in 0 to G_DIGITS-1 generate
+      f_digit_ok : assert always {done_o} |-> {to_integer(bcd_r(4*d+3 downto 4*d)) = f_digit(d)};
+   end generate f_digits_ok_gen;
+
+
+   -----------------------------
+   -- ASSERTIONS ABOUT INTERNAL STATE (for the induction)
+   -----------------------------
+
+   -- The counter is the clock cycles left
+   f_cnt : assert always {f_age <= G_BITS} |-> {cnt_r = G_BITS - f_age};
+   f_idle : assert always {f_age > G_BITS} |-> {cnt_r = 0 and done_r = '0'};
+
+   -----------------------------
+   -- COVER STATEMENTS
+   -----------------------------
+
+   -- The largest number
+   f_cover : cover {done_o = '1' and f_bin = (f_bin'range => '1')};
+
+} -- vunit i_bcd(bcd(rtl))

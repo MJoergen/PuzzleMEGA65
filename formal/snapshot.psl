@@ -1,0 +1,56 @@
+-- The properties of snapshot.vhd, the picture of the board: the protocol of
+-- the two buffers (no tearing) and of the hold of the shown context. The
+-- solver (busy_i and the path) and the frames are free.
+
+vunit i_snapshot(snapshot(rtl))
+{
+   -- set all declarations to run on clk_i
+   default clock is rising_edge(clk_i);
+
+
+   -----------------------------
+   -- ASSUMPTIONS
+   -----------------------------
+
+   -- The design starts in reset
+   f_reset : assume {rst_i};
+
+
+   -----------------------------
+   -- ASSERTIONS
+   -----------------------------
+
+   -- The buffer that was sent last (and that the VGA clock domain shows) is
+   -- never written, so the picture never tears
+   f_buffer : assert always {wr_en_o = '1' and rst_i = '0'} |-> {wr_addr_o(8) /= buf_o};
+
+   -- The statistics are sent with the buffer that was just written, and then
+   -- the other buffer is written
+   f_send : assert always {stats_valid_o = '1'} |-> {buf_o /= buf_r};
+   f_alternate : assert always {buf_o /= buf_r};
+
+   -- The squares written are on the board of the puzzle
+   f_square : assert always {wr_en_o = '1' and rst_i = '0'} |->
+      {to_integer(wr_addr_o(7 downto 0)) < C_PUZZLES(puzzle_r).squares};
+
+   -- The statistics are taken while the context is held and has no pass in
+   -- the pipeline, so they belong to the position of the picture
+   f_latch : assert always {latch_o = '1'} |-> {hold_o = '1' and busy_i(hold_ctx_o) = '0'};
+
+   -- The path is only read while the context is held, and the held context
+   -- does not change while it is held
+   f_path : assert always {state_r = PATH_ST} |-> {hold_o = '1' and path_ctx_o = hold_ctx_o};
+   f_hold_ctx : assert always {hold_o = '1' and rst_i = '0'} |=> {stable(hold_ctx_o) or hold_o = '0'};
+
+   -- The hold ends when the path has been read
+   f_hold : assert always {hold_o = '1'} |-> {state_r = HOLD_ST or state_r = VIS_ST or state_r = PATH_ST};
+
+
+   -----------------------------
+   -- COVER STATEMENTS
+   -----------------------------
+
+   -- The picture is being made
+   f_cover : cover {state_r = PATH_ST; state_r = CLEAR_ST};
+
+} -- vunit i_snapshot(snapshot(rtl))

@@ -1,0 +1,27 @@
+## Formal verification of bcd.vhd, for every number of 10 bits (4 digits),
+## see bcd.psl. The induction is longer than a conversion (10 clock cycles),
+## so every done_o in it has its start in it.
+##
+## Run one task:   sby --yosys "yosys -m ghdl" -f bcd.sby prove
+## Run everything: sby --yosys "yosys -m ghdl" -f bcd.sby
+
+[tasks]
+cover
+prove
+
+[options]
+cover: mode cover
+cover: depth 20
+prove: mode prove
+prove: depth 14
+
+[engines]
+smtbmc
+
+[script]
+ghdl --std=08 -gG_BITS=10 -gG_DIGITS=4 bcd.vhd bcd.psl -e bcd
+prep -top bcd
+
+[files]
+bcd.psl
+../src/vga/bcd.vhd
