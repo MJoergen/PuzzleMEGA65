@@ -246,3 +246,50 @@ from stage 7 to stage 0 (stage 7 only ORs the children and writes the stack,
 which can be written unconditionally), the stack becomes distributed RAM
 with an asynchronous read (stage 1), and the wide priority logic uses groups
 of 8 bits instead of one long carry chain.
+
+## 6. Dynamic split: results
+
+* The model now steps all the contexts in the hardware's order (pass by
+  pass; ids 0 to 7, engines 0 to E-1), so the claims are the same.
+  Efficiency (nodes per context of a perfect split / passes of the slowest
+  context), depth 4 unless noted:
+
+  | Puzzle | Engines | Contexts | Static split | Dynamic split |
+  | ------ | ------: | -------: | -----------: | ------------: |
+  | 8x8    |       1 |        8 |       97.8 % |              |
+  | 8x8    |       4 |       32 |       91.5 % |       99.1 % |
+  | 8x8    |       8 |       64 |  89.3 % (d5) |       98.1 % |
+  | 8x8    |      16 |      128 |              |       95.5 % |
+  | 6x10   |       8 |       64 |              |       93.8 % |
+  | 3x20   |       8 |       64 |              |       98.8 % |
+  | 7x7    |       1 |        8 |  90.1 % (d3) |  96.2 % (d3) |
+  | 5x8    |       4 |       32 |              |  96.8 % (d3) |
+
+  8x8 with 16 engines: 6.98 million passes for the slowest context, i.e.
+  56 million clock cycles, 0.25 s at 227 MHz (the C++ program: 42.6 s).
+* The engine with the dynamic split matches the model pass by pass
+  (engine_tb). Out of context: the commit stage was too slow (the OR of all
+  the children, then the next level), so the decision moved to stage 0, and
+  then the compare of the target in stage 6 (moved to stage 4, the target
+  cannot change during a pass). Now 8x8 meets 250 MHz (+0.21 ns), 16x16 is
+  at 232 MHz (the 129-bit count of trailing ones). Size: 8x8 1,550 LUTs (520
+  of them distributed RAM for the stack) and 1,950 registers; 16x16 5,000
+  LUTs and 4,400 registers.
+
+## 7. The picture of the board
+
+* Prototyped in Python first (`tools/render.py`), with exactly the integer
+  arithmetic of the hardware: each square is split into four quadrants, and
+  each quadrant is drawn from the distances to its two edges and from which
+  of its three neighbours have the same piece: the inside, a straight edge,
+  an outer corner (rounded, radius cell/4, compared as squared distances, so
+  no square root), or an inner corner. The boundary gets a dark outline and
+  a light rim, the gap between pieces is about cell/12, and an empty square
+  is a dark rounded square of its own. The colours of the pieces are spaced
+  by the golden angle on the colour wheel (`src/vga/palette_pkg.vhd` is
+  generated from render.py).
+* `src/vga/board.vhd` is a 7-stage pipeline of the same algorithm, and
+  `sim/board_tb.vhd` compares all 1280x1024 pixels of three frames (8x8, a
+  partial 16x16 with many empty squares, a partial 1x27) with render.py. All
+  pixels are equal (after fixing a missing stage for the read latency of the
+  board memory).

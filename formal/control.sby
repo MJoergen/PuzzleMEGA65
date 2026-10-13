@@ -1,0 +1,32 @@
+## Formal verification of control.vhd, the control of the modes. The inputs
+## from the solver are free (see control.psl), so the properties hold for any
+## behaviour of the solver. The engines are those of the MEGA65 (the default
+## of G_ENGINES), and a slow step is made every 3 clock cycles, so that the
+## slow mode is reached by the cover statements.
+##
+## Run one task:   sby --yosys "yosys -m ghdl" -f control.sby prove
+## Run everything: sby --yosys "yosys -m ghdl" -f control.sby
+
+[tasks]
+cover
+prove
+
+[options]
+cover: mode cover
+cover: depth 45
+prove: mode prove
+prove: depth 40
+
+[engines]
+smtbmc
+
+[script]
+ghdl --std=08 -gG_SLOW_CYCLES=3 util_pkg.vhd puzzle_pkg.vhd ctrl_pkg.vhd control.vhd control.psl -e control
+prep -top control
+
+[files]
+control.psl
+../src/util_pkg.vhd
+../src/main/puzzle_pkg.vhd
+../src/ctrl_pkg.vhd
+../src/main/control.vhd

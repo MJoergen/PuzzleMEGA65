@@ -61,6 +61,7 @@ architecture structural of main is
    signal count       : natural range 0 to 32;
    signal sol         : natural range 0 to 32;
    signal sol_ctx     : natural range 0 to 255;
+   signal sol_any     : std_logic;
    signal claimed     : std_logic_vector(31 downto 0);
    signal busy        : std_logic_vector(0 to 255);
    signal ctx_done    : std_logic_vector(0 to 255);
@@ -96,6 +97,7 @@ begin
          rst_i        => rst_i,
          cmd_valid_i  => cmd_valid_i,
          cmd_i        => cmd_i,
+         sol_any_i    => sol_any,
          sol_i        => sol,
          sol_ctx_i    => sol_ctx,
          ctx_done_i   => ctx_done,
@@ -128,6 +130,7 @@ begin
          count_o       => count,
          sol_o         => sol,
          sol_ctx_o     => sol_ctx,
+         sol_any_o     => sol_any,
          claimed_o     => claimed,
          busy_o        => busy,
          ctx_done_o    => ctx_done,

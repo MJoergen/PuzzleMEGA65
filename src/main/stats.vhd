@@ -74,6 +74,7 @@ architecture rtl of stats is
    signal recip_r       : std_logic_vector(31 downto 0);
    signal product_r     : std_logic_vector(52 downto 0);
    signal progress_r    : std_logic_vector( 9 downto 0);
+   signal slow_r        : std_logic_vector( 7 downto 0) := (others => '0');
 
 begin
 
@@ -126,23 +127,27 @@ begin
       end if;
    end process p_time;
 
-   -- The progress, in three clock cycles
+   -- The progress, in three clock cycles, once every 256 clock cycles (it is
+   -- shown once in each frame)
    p_progress : process (clk_i)
       variable n_v : integer;
    begin
       if rising_edge(clk_i) then
-         n_v := to_integer(claimed_i) - C_STAGES * G_ENGINES(puzzle_i);
-         if n_v < 0 then
-            n_v := 0;
-         elsif n_v > C_PUZZLES(puzzle_i).frontier then
-            n_v := C_PUZZLES(puzzle_i).frontier;
-         end if;
-         subtrees_r <= to_slv(n_v, 21);
-         recip_r    <= C_RECIP(puzzle_i);
-         product_r  <= subtrees_r * recip_r;
-         progress_r <= product_r(29 downto 20);
-         if finished_i = '1' then
-            progress_r <= to_slv(1000, 10);
+         slow_r <= slow_r + 1;
+         if slow_r(7 downto 2) = "000000" then
+            n_v := to_integer(claimed_i) - C_STAGES * G_ENGINES(puzzle_i);
+            if n_v < 0 then
+               n_v := 0;
+            elsif n_v > C_PUZZLES(puzzle_i).frontier then
+               n_v := C_PUZZLES(puzzle_i).frontier;
+            end if;
+            subtrees_r <= to_slv(n_v, 21);
+            recip_r    <= C_RECIP(puzzle_i);
+            product_r  <= subtrees_r * recip_r;
+            progress_r <= product_r(29 downto 20);
+            if finished_i = '1' then
+               progress_r <= to_slv(1000, 10);
+            end if;
          end if;
       end if;
    end process p_progress;

@@ -12,8 +12,8 @@
 -- one, i.e. the width of the window of the engine, see engine.vhd.
 --
 -- The search of a puzzle is split at the depth "depth" between the contexts of
--- its "engines" engines (C_STAGES contexts each), and "frontier" is the number
--- of nodes at that depth, used for the progress. The size of a square on the
+-- its engines (C_STAGES contexts each), and "frontier" is the number of nodes
+-- at that depth, used for the progress. The size of a square on the
 -- screen (cell), and the top left corner of the board (x0, y0), are in pixels
 -- of the 1280x1024 screen, see board.vhd.
 --
@@ -31,6 +31,8 @@
 library ieee;
 use ieee.std_logic_1164.all;
 
+use work.util_pkg.all;
+
 package puzzle_pkg is
 
    -- The number of pipeline stages of an engine, i.e. its number of contexts.
@@ -45,7 +47,7 @@ package puzzle_pkg is
    constant C_MAX_SQUARES : positive := 256;
    constant C_MAX_ROWS    : positive := 16;
    constant C_MAX_COLS    : positive := 27;
-   constant C_MAX_ENGINES : positive := 1;
+   constant C_MAX_ENGINES : positive := 16;
    constant C_MAX_CELL    : positive := 96;   -- Pixels
 
    type offsets_t is array (0 to C_MAX_SIZE-1) of natural range 0 to C_MAX_WIDTH-1;
@@ -71,7 +73,6 @@ package puzzle_pkg is
       width      : positive;
       depth      : positive;
       frontier   : positive;
-      engines    : positive;
       cell       : positive;
       x0         : natural;
       y0         : natural;
@@ -83,32 +84,37 @@ package puzzle_pkg is
 
    constant C_PUZZLES : puzzle_vector(0 to C_NUM_PUZZLES-1) := (
       (rows =>  8, cols =>  8, squares =>  64, pieces => 13, slots =>  64, first_slot =>   0,
-       width =>  33, depth => 4, frontier =>  153936, engines => 1, cell => 88, x0 => 288, y0 =>  96,
+       width =>  33, depth => 4, frontier =>  153936, cell => 88, x0 => 288, y0 =>  96,
        name => "8x8  ", title => "12 pentominoes and a square   "),
       (rows =>  6, cols => 10, squares =>  60, pieces => 12, slots =>  63, first_slot =>  64,
-       width =>  41, depth => 4, frontier =>  308206, engines => 1, cell => 96, x0 => 160, y0 => 160,
+       width =>  41, depth => 4, frontier =>  308206, cell => 96, x0 => 160, y0 => 160,
        name => "6x10 ", title => "12 pentominoes                "),
       (rows =>  3, cols => 20, squares =>  60, pieces => 12, slots =>  50, first_slot => 127,
-       width =>  43, depth => 4, frontier =>  240188, engines => 1, cell => 60, x0 =>  40, y0 => 358,
+       width =>  43, depth => 4, frontier =>  240188, cell => 60, x0 =>  40, y0 => 358,
        name => "3x20 ", title => "12 pentominoes                "),
       (rows =>  5, cols =>  8, squares =>  40, pieces => 10, slots =>  38, first_slot => 177,
-       width =>  25, depth => 4, frontier =>   59632, engines => 1, cell => 96, x0 => 256, y0 => 208,
+       width =>  25, depth => 4, frontier =>   59632, cell => 96, x0 => 256, y0 => 208,
        name => "5x8  ", title => "10 tetrominoes                "),
       (rows =>  7, cols =>  7, squares =>  49, pieces => 10, slots =>  48, first_slot => 215,
-       width =>  29, depth => 3, frontier =>    4816, engines => 1, cell => 96, x0 => 304, y0 => 112,
+       width =>  29, depth => 3, frontier =>    4816, cell => 96, x0 => 304, y0 => 112,
        name => "7x7  ", title => "9 pentominoes and a square    "),
       (rows =>  5, cols =>  5, squares =>  25, pieces =>  5, slots =>  28, first_slot => 263,
-       width =>  16, depth => 1, frontier =>      17, engines => 1, cell => 96, x0 => 400, y0 => 208,
+       width =>  16, depth => 1, frontier =>      17, cell => 96, x0 => 400, y0 => 208,
        name => "5x5  ", title => "5 pentominoes                 "),
       (rows =>  1, cols => 16, squares =>  16, pieces =>  8, slots =>   8, first_slot => 291,
-       width =>  10, depth => 2, frontier =>      49, engines => 1, cell => 76, x0 =>  32, y0 => 410,
+       width =>  10, depth => 2, frontier =>      49, cell => 76, x0 =>  32, y0 => 410,
        name => "1x16 ", title => "8 pairs of squares            "),
       (rows =>  1, cols => 27, squares =>  27, pieces =>  9, slots =>   9, first_slot => 299,
-       width =>  21, depth => 2, frontier =>      57, engines => 1, cell => 44, x0 =>  46, y0 => 426,
+       width =>  21, depth => 2, frontier =>      57, cell => 44, x0 =>  46, y0 => 426,
        name => "1x27 ", title => "9 triples of squares          "),
       (rows => 16, cols => 16, squares => 256, pieces => 19, slots => 152, first_slot => 308,
-       width => 129, depth => 4, frontier => 1135295, engines => 1, cell => 44, x0 => 288, y0 =>  96,
+       width => 129, depth => 4, frontier => 1135295, cell => 44, x0 => 288, y0 =>  96,
        name => "16x16", title => "19 large pieces               "));
+
+   -- The number of engines of each puzzle on the MEGA65 and on the Nexys 4 DDR,
+   -- see solver.vhd, mega65.vhd, and nexys4ddr.vhd
+   constant C_ENGINES_MEGA65 : natural_vector(0 to C_NUM_PUZZLES-1) := (16, 8, 8, 4, 2, 1, 1, 1, 2);
+   constant C_ENGINES_NEXYS  : natural_vector(0 to C_NUM_PUZZLES-1) := (4, 2, 2, 1, 1, 1, 1, 1, 1);
 
    -- The slots of all the puzzles
    constant C_SLOTS : slot_vector(0 to 459) := (

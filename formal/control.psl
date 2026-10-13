@@ -1,0 +1,122 @@
+-- The properties of control.vhd, the control of the modes. The inputs from
+-- the solver (the solutions and the done flags) and the commands are free,
+-- so the properties hold for any behaviour of the solver.
+
+vunit i_control(control(rtl))
+{
+   -- The command of the last clock cycle, and whether there was one
+   signal f_cmd_d       : cmd_t;
+   signal f_cmd_valid_d : std_logic := '0';
+   signal f_rst_d       : std_logic := '1';
+
+   -- A solution was seen in the mode "next" (and the halt has been set),
+   -- and no command since
+   signal f_halted      : std_logic := '0';
+
+   -- set all declarations to run on clk_i
+   default clock is rising_edge(clk_i);
+
+   p_delay : process (clk_i)
+   begin
+      if rising_edge(clk_i) then
+         f_cmd_d       <= cmd_i;
+         f_cmd_valid_d <= cmd_valid_i;
+         f_rst_d       <= rst_i;
+      end if;
+   end process p_delay;
+
+
+   -----------------------------
+   -- ASSUMPTIONS
+   -----------------------------
+
+   -- The design starts in reset
+   f_reset : assume {rst_i};
+
+   -- The context of a solution is a context of the puzzle
+   f_sol_ctx : assume always {sol_i /= 0} |-> {sol_ctx_i < num_ctx(puzzle_r)};
+
+
+   -----------------------------
+   -- ASSERTIONS ABOUT OUTPUTS
+   -----------------------------
+
+   -- After a reset: puzzle 1, paused, and the solver is reset
+   f_after_reset : assert always {rst_i} |=>
+      {puzzle_o = 0 and status_o = C_ST_PAUSED and run_o = '0' and halt_o = '0' and
+       restart_o = '1'};
+
+   -- The search only runs in the modes "all" and "next", and not while the
+   -- solver is reset or settles
+   f_run : assert always {run_o} |->
+      {(mode_r = ALL_ST or mode_r = NEXT_ST) and finished_r = '0' and settle_r = 0 and
+       restart_o = '0'};
+
+   -- A solution in the mode "next" sets the halt at once, which stops the
+   -- search, so no other pass is committed (engine.vhd)
+   f_halt : assert always
+      {sol_any_i = '1' and mode_r = NEXT_ST and settle_r = 0 and cmd_valid_i = '0' and
+       rst_i = '0' and done_i = '0' and finished_r = '0'} |=>
+      {halt_o = '1' and run_o = '0' and status_o = C_ST_SOLUTION};
+
+   -- The halt stays until the next command (or a reset)
+   f_halt_stays : assert always
+      {halt_o = '1' and cmd_valid_i = '0' and rst_i = '0'} |=> {halt_o = '1'};
+
+   -- A command clears the halt
+   f_halt_clear : assert always {cmd_valid_i = '1' and rst_i = '0'} |=> {halt_o = '0'};
+
+   -- A puzzle is selected: the solver is reset, the puzzle is that of the
+   -- command, and the search is paused
+   f_puzzle : assert always
+      {cmd_valid_i = '1' and cmd_i.code = C_CMD_PUZZLE and cmd_i.puzzle < C_NUM_PUZZLES and
+       rst_i = '0'} |=>
+      {puzzle_o = to_integer(f_cmd_d.puzzle) and restart_o = '1' and status_o = C_ST_PAUSED};
+
+   -- The puzzle only changes by a command or a reset
+   f_puzzle_stays : assert always {cmd_valid_i = '0' and rst_i = '0'} |=> {stable(puzzle_o)};
+
+   -- A credit (a step) is for the context that is shown, and only when the
+   -- search is not finished, and not while the solver settles
+   f_credit : assert always {credit_o} |->
+      {credit_ctx_o = disp_ctx_o and finished_r = '0' and settle_r = 0};
+
+   -- The context that is shown is a context of the puzzle
+   f_disp : assert always {disp_ctx_o < num_ctx(puzzle_r)};
+
+   -- When the search is finished, it says so, and it does not run
+   f_finished : assert always {finished_r} |-> {status_o = C_ST_FINISHED and run_o = '0'};
+
+   -- The search is finished when the solver is done, unless a command came
+   f_done : assert always
+      {done_i = '1' and settle_r = 0 and cmd_valid_i = '0' and rst_i = '0'} |=>
+      {status_o = C_ST_FINISHED};
+
+   -- After a restart, the search is not finished, and the first context is
+   -- shown
+   f_restart : assert always {restart_o = '1' and f_rst_d = '0'} |->
+      {finished_r = '0' and disp_r = 0 and settle_r > 0};
+
+
+   -----------------------------
+   -- ASSERTIONS ABOUT INTERNAL STATE
+   -----------------------------
+
+   -- The restart is two clock cycles long, and the solver settles after it
+   f_settle : assert always {restart_r /= "00"} |-> {settle_r >= C_SETTLE - 2};
+
+
+   -----------------------------
+   -- COVER STATEMENTS
+   -----------------------------
+
+   -- A solution in the mode "next"
+   f_cover_solution : cover {status_o = C_ST_NEXT; status_o = C_ST_SOLUTION};
+
+   -- The end of a search in the mode "all"
+   f_cover_finished : cover {status_o = C_ST_ALL; status_o = C_ST_FINISHED};
+
+   -- A slow step
+   f_cover_slow : cover {status_o = C_ST_SLOW and credit_o = '1'};
+
+} -- vunit i_control(control(rtl))

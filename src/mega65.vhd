@@ -1,0 +1,339 @@
+-- This is the design for the MEGA65. It is used by the top level modules of
+-- the board revisions R3 (mega65_r3.vhd) and R6 (mega65_r6.vhd), which have
+-- the same FPGA. Its ports are the reset and the pins that are the same on
+-- both revisions. The top level modules connect them to the pins of the FPGA,
+-- and handle the pins that only one of the revisions has.
+--
+-- The design searches all the solutions of a puzzle (see core.vhd), and
+-- shows the search on the VGA and the HDMI output (1280x1024 @ 60 Hz). This
+-- module holds the constants of the MEGA65 and instantiates the clock and
+-- reset generation, core, and what is specific to the MEGA65: the keyboard,
+-- the video DAC, and the HDMI output. The same design also runs on the
+-- Nexys 4 DDR board, see nexys4ddr.vhd.
+--
+-- The ports of the MEGA65:
+-- * The keyboard is read by the MiSTer2MEGA65 keyboard driver (m2m_keyb.vhd,
+--   in src/keyboard/), in the VGA clock domain, and keys.vhd turns the keys
+--   into commands. The driver also turns on the power LED of the keyboard
+--   (green).
+-- * The VGA output goes through a video DAC with 8 bits per colour. The DAC
+--   needs a clock, which is the VGA clock inverted, so the DAC samples the
+--   pixel colour in the middle of each pixel. The colour and the sync signals
+--   are registered in the IOBs, so they all change at the same time, half a
+--   clock cycle (4.6 ns) before the DAC samples them.
+-- * The same picture is also output on the HDMI connector, in DVI mode (i.e.
+--   without audio and InfoFrames), because 1280x1024 is not a CEA-861 video
+--   mode. vga_to_hdmi.vhd encodes the picture to TMDS symbols, and the
+--   serialisers output them with the TMDS clock (5 * 108 = 540 MHz, on both
+--   edges).
+--
+-- The constraints of the clock domain crossings are in mega65-r3.xdc and
+-- mega65-r6.xdc.
+
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std_unsigned.all;
+
+library unisim;
+use unisim.vcomponents.all;
+
+use work.util_pkg.all;
+use work.video_pkg.all;
+use work.puzzle_pkg.all;
+use work.ctrl_pkg.all;
+use work.types_pkg.all;
+
+entity mega65 is
+   port (
+      clk_i          : in  std_logic;                      -- 100 MHz
+      rstn_i         : in  std_logic;                      -- Active low
+
+      -- MEGA65 keyboard
+      kb_io0_o       : out std_logic;                      -- Clock to keyboard
+      kb_io1_o       : out std_logic;                      -- Data to keyboard
+      kb_io2_i       : in  std_logic;                      -- Data from keyboard
+
+      -- VGA via the video DAC
+      vga_red_o      : out std_logic_vector(7 downto 0);
+      vga_green_o    : out std_logic_vector(7 downto 0);
+      vga_blue_o     : out std_logic_vector(7 downto 0);
+      vga_hs_o       : out std_logic;
+      vga_vs_o       : out std_logic;
+      vdac_clk_o     : out std_logic;
+      vdac_sync_n_o  : out std_logic;
+      vdac_blank_n_o : out std_logic;
+
+      -- HDMI
+      tmds_data_p_o  : out std_logic_vector(2 downto 0);
+      tmds_data_n_o  : out std_logic_vector(2 downto 0);
+      tmds_clk_p_o   : out std_logic;
+      tmds_clk_n_o   : out std_logic
+   );
+end entity mega65;
+
+architecture structural of mega65 is
+
+   -- The number of engines of each puzzle, see puzzle_pkg.vhd and README.md
+   -- (Implementation results).
+   constant C_ENGINES       : natural_vector(0 to C_NUM_PUZZLES-1) := C_ENGINES_MEGA65;
+
+   -- The VCO of the MMCM (see clk_rst.vhd): 100 MHz / 5 * 54 = 1080 MHz. This
+   -- is the only VCO frequency which gives the pixel clock of 108 MHz exactly.
+   constant C_VCO_DIVIDE    : positive := 5;
+   constant C_VCO_MULT      : real     := 54.0;
+
+   -- The video mode (see video_pkg.vhd), and the divider of the VGA clock,
+   -- which gives the pixel clock (1080 MHz / 10 = 108 MHz, see clk_rst.vhd).
+   constant C_VIDEO         : video_mode_t := C_VIDEO_1280X1024;
+   constant C_VGA_DIVIDE    : positive := 10;
+   constant C_VGA_FREQ      : natural  := 108_000_000;
+
+   -- The divider of the TMDS clock of the HDMI output, which must be five
+   -- times the pixel clock (1080 MHz / 2 = 540 MHz, see clk_rst.vhd).
+   constant C_TMDS_DIVIDE   : positive := C_VGA_DIVIDE / 5;
+
+   -- The divider of the MAIN clock (see clk_rst.vhd), and its frequency in Hz:
+   -- 1080 MHz / 4.75 = 227.37 MHz. See README.md (Implementation results) for
+   -- the timing.
+   constant C_MAIN_DIVIDE   : real     := 4.75;
+   constant C_MAIN_FREQ     : natural  :=
+      natural(100.0E6 / real(C_VCO_DIVIDE) * C_VCO_MULT / C_MAIN_DIVIDE);
+
+   -- The keys, shown at the bottom of the screen (see status.vhd)
+   constant C_HELP          : string :=
+      "A all   N next solution   S slow   O one step   P pause   1-9 puzzle";
+
+   signal main_clk       : std_logic;
+   signal main_rst       : std_logic;
+   signal vga_clk        : std_logic;
+   signal vga_rst        : std_logic;
+   signal tmds_clk       : std_logic;
+
+   -- The keyboard driver cycles through all the keys (key_num), and shows
+   -- whether each of them is pressed (key_pressed_n, active low), see
+   -- keys.vhd.
+   signal key_num        : natural range 0 to 79;
+   signal key_pressed_n  : std_logic;
+   signal cmd_valid      : std_logic;
+   signal cmd            : cmd_t;
+
+   signal vga_hs         : std_logic;
+   signal vga_vs         : std_logic;
+   signal vga_de         : std_logic;
+   signal vga_col        : std_logic_vector(23 downto 0);  -- RRGGBB
+
+   -- The sync signals, active high, for vga_to_hdmi
+   signal hdmi_hs        : std_logic;
+   signal hdmi_vs        : std_logic;
+
+   -- The TMDS symbols of the three HDMI data channels
+   signal hdmi_tmds      : slv_9_0_t(0 to 2);
+
+   -- The registers of the outputs to the DAC and the VGA connector, placed in
+   -- the IOBs
+   signal vdac_red_r     : std_logic_vector( 7 downto 0);
+   signal vdac_green_r   : std_logic_vector( 7 downto 0);
+   signal vdac_blue_r    : std_logic_vector( 7 downto 0);
+   signal vdac_hs_r      : std_logic;
+   signal vdac_vs_r      : std_logic;
+
+   attribute iob : string;
+   attribute iob of vdac_red_r   : signal is "true";
+   attribute iob of vdac_green_r : signal is "true";
+   attribute iob of vdac_blue_r  : signal is "true";
+   attribute iob of vdac_hs_r    : signal is "true";
+   attribute iob of vdac_vs_r    : signal is "true";
+
+begin
+
+   --------------------------------------------------
+   -- Instantiate clock and reset generation
+   --------------------------------------------------
+
+   i_clk_rst : entity work.clk_rst
+      generic map (
+         G_VCO_DIVIDE  => C_VCO_DIVIDE,
+         G_VCO_MULT    => C_VCO_MULT,
+         G_MAIN_DIVIDE => C_MAIN_DIVIDE,
+         G_VGA_DIVIDE  => C_VGA_DIVIDE,
+         G_TMDS_DIVIDE => C_TMDS_DIVIDE
+      )
+      port map (
+         clk_i      => clk_i,
+         rstn_i     => rstn_i,
+         main_clk_o => main_clk,
+         main_rst_o => main_rst,
+         vga_clk_o  => vga_clk,
+         vga_rst_o  => vga_rst,
+         tmds_clk_o => tmds_clk
+      ); -- i_clk_rst
+
+
+   --------------------------------------------------
+   -- The keyboard, in the VGA clock domain
+   --------------------------------------------------
+
+   i_m2m_keyb : entity work.m2m_keyb
+      port map (
+         clk_main_i       => vga_clk,
+         clk_main_speed_i => C_VGA_FREQ,
+         kio8_o           => kb_io0_o,
+         kio9_o           => kb_io1_o,
+         kio10_i          => kb_io2_i,
+         enable_core_i    => '1',
+         key_num_o        => key_num,
+         key_pressed_n_o  => key_pressed_n,
+         power_led_i      => '1',
+         power_led_col_i  => X"00FF00",         -- Green
+         drive_led_i      => '0',
+         drive_led_col_i  => X"000000",
+         qnice_keys_n_o   => open
+      ); -- i_m2m_keyb
+
+   i_keys : entity work.keys
+      port map (
+         clk_i           => vga_clk,
+         key_num_i       => key_num,
+         key_pressed_n_i => key_pressed_n,
+         cmd_valid_o     => cmd_valid,
+         cmd_o           => cmd
+      ); -- i_keys
+
+
+   --------------------------------------------------
+   -- Instantiate the design
+   --------------------------------------------------
+
+   i_core : entity work.core
+      generic map (
+         G_CLK_FREQ    => C_MAIN_FREQ,
+         G_ENGINES     => C_ENGINES,
+         G_SLOW_CYCLES => C_MAIN_FREQ / 2,
+         G_MODE        => C_VIDEO,
+         G_HELP        => C_HELP
+      )
+      port map (
+         main_clk_i  => main_clk,
+         main_rst_i  => main_rst,
+         vga_clk_i   => vga_clk,
+         cmd_valid_i => cmd_valid,
+         cmd_i       => cmd,
+         vga_hs_o    => vga_hs,
+         vga_vs_o    => vga_vs,
+         vga_de_o    => vga_de,
+         vga_col_o   => vga_col
+      ); -- i_core
+
+
+   --------------------------------------------------
+   -- Video DAC
+   --------------------------------------------------
+
+   -- The outputs are registered, with one register in the IOB of each output,
+   -- so that they all change at the same time.
+   p_vdac : process (vga_clk)
+   begin
+      if rising_edge(vga_clk) then
+         vdac_red_r   <= vga_col(23 downto 16);
+         vdac_green_r <= vga_col(15 downto  8);
+         vdac_blue_r  <= vga_col( 7 downto  0);
+         vdac_hs_r    <= vga_hs;
+         vdac_vs_r    <= vga_vs;
+      end if;
+   end process p_vdac;
+
+   vga_red_o   <= vdac_red_r;
+   vga_green_o <= vdac_green_r;
+   vga_blue_o  <= vdac_blue_r;
+   vga_hs_o    <= vdac_hs_r;
+   vga_vs_o    <= vdac_vs_r;
+
+   -- The DAC samples the colour on the rising edge of its clock. The clock is
+   -- low in the first half of the VGA clock cycle and high in the second half,
+   -- i.e. the VGA clock inverted.
+   i_vdac_clk : ODDR
+      generic map (
+         DDR_CLK_EDGE => "SAME_EDGE",
+         INIT         => '0',
+         SRTYPE       => "SYNC"
+      )
+      port map (
+         Q  => vdac_clk_o,
+         C  => vga_clk,
+         CE => '1',
+         D1 => '0',
+         D2 => '1',
+         R  => '0',
+         S  => '0'
+      ); -- i_vdac_clk
+
+   vdac_sync_n_o  <= '0';  -- No sync on green
+   vdac_blank_n_o <= '1';  -- The colour is black outside the visible area
+
+
+   --------------------------------------------------
+   -- HDMI
+   --------------------------------------------------
+
+   -- vga_to_hdmi expects active high sync signals, and outputs them with the
+   -- polarity given by hs_pol and vs_pol.
+   hdmi_hs <= vga_hs xnor C_VIDEO.sync_active;
+   hdmi_vs <= vga_vs xnor C_VIDEO.sync_active;
+
+   -- Encode the picture to TMDS symbols. DVI mode is used, so there are no
+   -- data islands (audio and InfoFrames), and the VIC, the aspect ratio, the
+   -- pixel repetition, and the audio inputs are not used.
+   i_vga_to_hdmi : entity work.vga_to_hdmi
+      port map (
+         select_44100 => '0',
+         dvi          => '1',
+         vic          => X"00", -- Not a CEA-861 video mode
+         aspect       => "00",  -- No data
+         pix_rep      => '0',
+         vs_pol       => C_VIDEO.sync_active,
+         hs_pol       => C_VIDEO.sync_active,
+         vga_rst      => vga_rst,
+         vga_clk      => vga_clk,
+         vga_vs       => hdmi_vs,
+         vga_hs       => hdmi_hs,
+         vga_de       => vga_de,
+         vga_r        => vga_col(23 downto 16),
+         vga_g        => vga_col(15 downto  8),
+         vga_b        => vga_col( 7 downto  0),
+         pcm_rst      => vga_rst,
+         pcm_clk      => vga_clk,
+         pcm_clken    => '0',
+         pcm_l        => (others => '0'),
+         pcm_r        => (others => '0'),
+         pcm_acr      => '0',
+         pcm_n        => (others => '0'),
+         pcm_cts      => (others => '0'),
+         tmds         => hdmi_tmds
+      ); -- i_vga_to_hdmi
+
+   -- Serialise the three data channels, ten bits in each VGA clock cycle
+   gen_hdmi_data : for i in 0 to 2 generate
+      i_hdmi_data : entity work.serialiser_10to1_selectio
+         port map (
+            rst    => vga_rst,
+            clk    => vga_clk,
+            clk_x5 => tmds_clk,
+            d      => hdmi_tmds(i),
+            out_p  => tmds_data_p_o(i),
+            out_n  => tmds_data_n_o(i)
+         ); -- i_hdmi_data
+   end generate gen_hdmi_data;
+
+   -- The HDMI clock is the VGA clock, i.e. five ones and five zeros in each
+   -- VGA clock cycle.
+   i_hdmi_clk : entity work.serialiser_10to1_selectio
+      port map (
+         rst    => vga_rst,
+         clk    => vga_clk,
+         clk_x5 => tmds_clk,
+         d      => "0000011111",
+         out_p  => tmds_clk_p_o,
+         out_n  => tmds_clk_n_o
+      ); -- i_hdmi_clk
+
+end architecture structural;

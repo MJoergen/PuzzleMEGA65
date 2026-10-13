@@ -1,0 +1,29 @@
+## Formal verification of cdc_data.vhd, with two free clocks (multiclock), see
+## cdc_data.psl. The value has two bits. The top level (cdc_data_top.vhd)
+## registers the inputs in the source clock domain, as in the design.
+##
+## Run one task:   sby --yosys "yosys -m ghdl" -f cdc_data.sby prove
+## Run everything: sby --yosys "yosys -m ghdl" -f cdc_data.sby
+
+[tasks]
+cover
+prove
+
+[options]
+multiclock on
+cover: mode cover
+cover: depth 40
+prove: mode prove
+prove: depth 20
+
+[engines]
+smtbmc
+
+[script]
+ghdl --std=08 -gG_DATA_SIZE=2 -gG_INIT=00 cdc_data.vhd cdc_data_top.vhd cdc_data.psl -e cdc_data_top
+prep -top cdc_data_top
+
+[files]
+cdc_data.psl
+cdc_data_top.vhd
+../src/cdc_data.vhd

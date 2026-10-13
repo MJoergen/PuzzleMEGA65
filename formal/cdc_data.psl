@@ -1,0 +1,108 @@
+-- The properties of cdc_data.vhd, the clock domain crossing of a value. The
+-- two clocks are free (multiclock), i.e. they may have any frequencies and
+-- phases, and the formal tool chooses them.
+--
+-- The assumption is the protocol of the design: a new value (s_valid_i) is
+-- only sent when the last one has arrived, i.e. the toggle signal has gone
+-- through the synchronizer (the source does not know this, but in the design
+-- the values come once per frame, or once per key press, i.e. much more
+-- seldom), and the value only changes together with a pulse of s_valid_i.
+-- Then every value arrives whole (never a mix of two values), exactly once
+-- (one pulse of m_valid_o for each), and in order.
+
+vunit i_cdc_data(cdc_data(rtl))
+{
+   -- The last value sent (source clock domain), and the number of values
+   -- sent and received, modulo 4
+   signal f_value : std_logic_vector(G_DATA_SIZE-1 downto 0) := G_INIT;
+   signal f_sent  : natural range 0 to 3 := 0;
+   signal f_recv  : natural range 0 to 3 := 0;
+
+   -- A value is on the way, and one more value was sent than received
+   signal f_onway : std_logic;
+   signal f_ahead : std_logic;
+
+   p_sent : process (s_clk_i)
+   begin
+      if rising_edge(s_clk_i) then
+         if s_valid_i = '1' then
+            f_value <= s_data_i;
+            f_sent  <= (f_sent + 1) mod 4;
+         end if;
+      end if;
+   end process p_sent;
+
+   p_recv : process (m_clk_i)
+   begin
+      if rising_edge(m_clk_i) then
+         if m_valid_r = '1' then
+            f_recv <= (f_recv + 1) mod 4;
+         end if;
+      end if;
+   end process p_recv;
+
+
+   -----------------------------
+   -- ASSUMPTIONS
+   -----------------------------
+
+   -- A new value only when the last one has arrived, and the value only
+   -- changes in the clock cycle of a pulse
+   f_protocol : assume always ({s_valid_i = '1'} |->
+      {s_toggle_r = m_sync_d and m_sync = m_sync_d and m_meta = m_sync and
+       f_sent = f_recv}) @rising_edge(s_clk_i);
+   f_stable : assume always ({s_valid_i = '0'} |-> {stable(s_data_i)}) @rising_edge(s_clk_i);
+   f_first  : assume ({s_data_i = G_INIT and s_valid_i = '0'}) @rising_edge(s_clk_i);
+
+
+   -----------------------------
+   -- ASSERTIONS
+   -----------------------------
+
+   -- A value arrives whole: the output is always a value that was sent (or
+   -- the initial value), and when it changes, it is the latest one
+   f_whole : assert always ({m_valid_r = '1'} |-> {m_data_r = f_value}) @rising_edge(m_clk_i);
+
+   -- Each value arrives once: at most one value is on the way
+   f_once : assert always ({f_sent = f_recv or f_sent = (f_recv + 1) mod 4})
+      @rising_edge(m_clk_i);
+
+   -- When no value is on the way, the output is the last value
+   f_last : assert always ({f_sent = f_recv and m_valid_r = '0'} |-> {m_data_r = f_value})
+      @rising_edge(m_clk_i);
+
+   -- The output only changes with m_valid_o
+   f_change : assert always ({m_valid_r = '0'} |=> {stable(m_data_r) or m_valid_r = '1'})
+      @rising_edge(m_clk_i);
+
+
+   -----------------------------
+   -- ASSERTIONS ABOUT INTERNAL STATE (for the induction)
+   -----------------------------
+
+   -- The toggle moves along the synchronizer: at most one of the stages
+   -- differs from the next one
+   f_chain : assert always ({(s_toggle_r = m_meta or m_meta = m_sync) and
+                             (m_meta = m_sync or m_sync = m_sync_d) and
+                             (s_toggle_r = m_meta or m_sync = m_sync_d)}) @rising_edge(m_clk_i);
+
+   -- A value is on the way while the toggle has not reached m_sync_d, and
+   -- while m_valid_o is high (it is counted in the next clock cycle)
+   f_onway <= '1' when s_toggle_r /= m_sync_d or m_valid_r = '1' else '0';
+   f_ahead <= '1' when f_sent = (f_recv + 1) mod 4 else '0';
+   f_pending : assert always ({f_onway = f_ahead}) @rising_edge(m_clk_i);
+   f_one : assert always ({not ((s_toggle_r /= m_sync_d) and m_valid_r = '1')})
+      @rising_edge(m_clk_i);
+
+   -- Between the pulses, the input is the last value sent
+   f_input : assert always ({s_valid_i = '0'} |-> {s_data_i = f_value}) @rising_edge(s_clk_i);
+
+
+   -----------------------------
+   -- COVER STATEMENTS
+   -----------------------------
+
+   -- Two values arrive
+   f_cover : cover {f_recv = 2} @rising_edge(m_clk_i);
+
+} -- vunit i_cdc_data(cdc_data(rtl))

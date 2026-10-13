@@ -328,6 +328,18 @@ architecture rtl of engine is
       return r_v;
    end function init;
 
+   -- The ring after a reset: stage s holds context (C_STAGES - s) mod C_STAGES
+   function init_ring return stage_vector is
+      variable r_v : stage_vector(0 to C_STAGES-1);
+   begin
+      for s in 0 to C_STAGES-1 loop
+         r_v(s) := init((C_STAGES - s) mod C_STAGES);
+      end loop;
+      return r_v;
+   end function init_ring;
+
+   constant C_INIT_RING : stage_vector(0 to C_STAGES-1) := init_ring;
+
    -- The logic of the stages: each function gets the input register of the
    -- stage, and returns the output register.
 
@@ -554,6 +566,17 @@ architecture rtl of engine is
 
    signal rst_r       : std_logic;
 
+   -- True in simulation, false in synthesis: in simulation, the stages 2 to 6
+   -- are not computed for a stage without a pass (valid low). Their values
+   -- are then not used (a pass that is not valid is not committed), so the
+   -- result is the same, and the simulation of an engine that is paused is
+   -- fast.
+   constant C_SIM     : boolean := false
+-- pragma translate_off
+                                   or true
+-- pragma translate_on
+                                   ;
+
    function addr (id : natural; lvl : natural) return std_logic_vector is
    begin
       return to_slv(id, C_CTX_BITS) & to_slv(lvl, C_LVL_BITS);
@@ -592,52 +615,21 @@ begin
       variable s7_v   : stage_t;
       variable may_v  : std_logic;
       variable busy_v : std_logic_vector(C_STAGES-1 downto 0);
+      variable idle_v  : boolean := false;
+      variable first_v : boolean := false;     -- The first clock cycle of the reset
    begin
       if rising_edge(clk_i) then
-         -- Stage 7: the stack and the path are written one clock cycle later
-         s7_v    := stage7(ring_v(7), halt_i);
-         wr_en   <= s7_v.commit;
-         wr_addr <= addr(s7_v.id, s7_v.lvl);
-         wr_ds   <= to_slv(s7_v.base, 9) & s7_v.win & s7_v.used;
-         wr_fs   <= s7_v.f_rem;
-         wr_path <= to_slv(s7_v.base, 9) & s7_v.slot;
-         if s7_v.commit = '1' then
-            vis(s7_v.id) <= to_slv(s7_v.lvl + 1, 5);
-            if s7_v.skip = '0' then
-               credit_r(s7_v.id) <= '0';
-            end if;
-         end if;
-
-         ring_v(7) := stage6(ring_v(6));
-         ring_v(6) := stage5(ring_v(5));
-         ring_v(5) := stage4(ring_v(4), tgt_r(ring_v(4).id));
-         ring_v(4) := stage3(ring_v(3));
-         ring_v(3) := stage2(ring_v(2));
-         ring_v(2) := stage1(ring_v(1), ds_rd, fs_rd);
-
-         -- Stage 0
-         may_v := (run_i or credit_r(ring_v(0).id)) and not halt_i;
-         if hold_i = '1' and to_integer(hold_ctx_i) = ring_v(0).id then
-            may_v := '0';
-         end if;
-         ring_v(1) := stage0(ring_v(0), may_v);
-         rd_addr   <= addr(ring_v(1).id, ring_v(1).lvl);
-         cdone_r(ring_v(1).id) <= ring_v(1).done;
-
-         ring_v(0) := s7_v;
-
-         -- New targets and credits
-         if grant_i = '1' then
-            tgt_r(to_integer(grant_ctx_i)) <= to_integer(grant_tgt_i);
-         end if;
-         if credit_i = '1' then
-            credit_r(to_integer(credit_ctx_i)) <= '1';
-         end if;
-
-         if rst_r = '1' then
-            for s in 0 to C_STAGES-1 loop
-               ring_v(s) := init((C_STAGES - s) mod C_STAGES);
-            end loop;
+         if rst_r = '1' and C_SIM and idle_v then
+            -- In simulation, an engine that stays in reset does nothing, which
+            -- makes the simulation of the engines of the puzzles that are not
+            -- selected fast.
+            null;
+         elsif rst_r = '1' then
+            -- The reset. The stages are not computed (that would not change
+            -- anything).
+            idle_v   := true;
+            first_v  := true;
+            ring_v   := C_INIT_RING;
             wr_en    <= '0';
             vis      <= (others => (others => '0'));
             credit_r <= (others => '0');
@@ -645,31 +637,99 @@ begin
             for i in 0 to C_STAGES-1 loop
                tgt_r(i) <= G_FIRST + i;
             end loop;
-         end if;
+            busy_r   <= (others => '0');
+         else
+            idle_v  := false;
 
-         -- The input register of stage 7
-         r7_id      <= ring_v(7).id;
-         r7_valid   <= ring_v(7).valid;
-         r7_counted <= ring_v(7).counted;
-         r7_sol     <= ring_v(7).sol;
-         r7_owned   <= ring_v(7).owned;
-         r7_skip    <= ring_v(7).skip;
-         r7_lvl     <= ring_v(7).lvl;
-         r7_base    <= ring_v(7).base;
-         r7_slot    <= ring_v(7).slot;
-
-         -- The contexts that have a pass in the stages 1 to 7, or whose path is
-         -- still to be written
-         busy_v := (others => '0');
-         for s in 1 to C_STAGES-1 loop
-            if ring_v(s).valid = '1' then
-               busy_v(ring_v(s).id) := '1';
+            -- Stage 7: the stack and the path are written one clock cycle later
+            s7_v    := stage7(ring_v(7), halt_i);
+            wr_en   <= s7_v.commit;
+            wr_addr <= addr(s7_v.id, s7_v.lvl);
+            wr_ds   <= to_slv(s7_v.base, 9) & s7_v.win & s7_v.used;
+            wr_fs   <= s7_v.f_rem;
+            wr_path <= to_slv(s7_v.base, 9) & s7_v.slot;
+            if s7_v.commit = '1' then
+               vis(s7_v.id) <= to_slv(s7_v.lvl + 1, 5);
+               if s7_v.skip = '0' then
+                  credit_r(s7_v.id) <= '0';
+               end if;
             end if;
-         end loop;
-         if s7_v.commit = '1' then
-            busy_v(s7_v.id) := '1';
+
+            if C_SIM and ring_v(6).valid = '0' then
+               ring_v(7) := ring_v(6);
+            else
+               ring_v(7) := stage6(ring_v(6));
+            end if;
+            if C_SIM and ring_v(5).valid = '0' then
+               ring_v(6) := ring_v(5);
+            else
+               ring_v(6) := stage5(ring_v(5));
+            end if;
+            if C_SIM and ring_v(4).valid = '0' then
+               ring_v(5) := ring_v(4);
+            else
+               ring_v(5) := stage4(ring_v(4), tgt_r(ring_v(4).id));
+            end if;
+            if C_SIM and ring_v(3).valid = '0' then
+               ring_v(4) := ring_v(3);
+            else
+               ring_v(4) := stage3(ring_v(3));
+            end if;
+            if C_SIM and ring_v(2).valid = '0' then
+               ring_v(3) := ring_v(2);
+            else
+               ring_v(3) := stage2(ring_v(2));
+            end if;
+            ring_v(2) := stage1(ring_v(1), ds_rd, fs_rd);
+
+            -- Stage 0
+            may_v := (run_i or credit_r(ring_v(0).id)) and not halt_i;
+            if hold_i = '1' and to_integer(hold_ctx_i) = ring_v(0).id then
+               may_v := '0';
+            end if;
+            ring_v(1) := stage0(ring_v(0), may_v);
+            cdone_r(ring_v(1).id) <= ring_v(1).done;
+
+            ring_v(0) := s7_v;
+
+            -- New targets and credits
+            if grant_i = '1' then
+               tgt_r(to_integer(grant_ctx_i)) <= to_integer(grant_tgt_i);
+            end if;
+            if credit_i = '1' then
+               credit_r(to_integer(credit_ctx_i)) <= '1';
+            end if;
+
+            -- The contexts that have a pass in the stages 1 to 7, or whose
+            -- path is still to be written
+            busy_v := (others => '0');
+            for s in 1 to C_STAGES-1 loop
+               if ring_v(s).valid = '1' then
+                  busy_v(ring_v(s).id) := '1';
+               end if;
+            end loop;
+            if s7_v.commit = '1' then
+               busy_v(s7_v.id) := '1';
+            end if;
+            busy_r <= busy_v;
          end if;
-         busy_r <= busy_v;
+
+         -- The stack is read at the address of the context in stage 0, and
+         -- the input register of stage 7 is copied for the outputs (not when
+         -- the engine stays in reset in simulation, see above)
+         if not (rst_r = '1' and C_SIM and idle_v and not first_v) then
+            rd_addr    <= addr(ring_v(1).id, ring_v(1).lvl);
+            r7_id      <= ring_v(7).id;
+            r7_valid   <= ring_v(7).valid;
+            r7_counted <= ring_v(7).counted;
+            r7_sol     <= ring_v(7).sol;
+            r7_owned   <= ring_v(7).owned;
+            r7_skip    <= ring_v(7).skip;
+            r7_lvl     <= ring_v(7).lvl;
+            r7_base    <= ring_v(7).base;
+            r7_slot    <= ring_v(7).slot;
+         end if;
+         first_v := false;
       end if;
    end process p_ring;
 

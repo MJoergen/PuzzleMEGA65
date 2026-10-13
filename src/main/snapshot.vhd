@@ -206,10 +206,11 @@ begin
                   cnt_r <= cnt_r + 1;
                end if;
 
-            -- The number of placements, after the read latency
+            -- The number of placements, after the read latency (two clock
+            -- cycles, see solver.vhd)
             when VIS_ST =>
                cnt_r <= cnt_r + 1;
-               if cnt_r = 3 then
+               if cnt_r = 5 then
                   vis_r      <= to_integer(path_vis_i);
                   lvl_r      <= 0;
                   path_lvl_o <= (others => '0');
@@ -217,11 +218,11 @@ begin
                   state_r    <= PATH_ST;
                end if;
 
-            -- Each placement: the address is set, and the data is taken
-            -- three clock cycles later
+            -- Each placement: the address is set, and the data is taken five
+            -- clock cycles later
             when PATH_ST =>
                cnt_r <= cnt_r + 1;
-               if cnt_r = 3 then
+               if cnt_r = 5 then
                   if lvl_r < vis_r then
                      anchors_r(lvl_r) <= path_anchor_i;
                      slots_r(lvl_r)   <= p_v.first_slot + to_integer(path_slot_i);

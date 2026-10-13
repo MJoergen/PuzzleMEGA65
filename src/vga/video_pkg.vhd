@@ -41,6 +41,9 @@ package video_pkg is
       v_visible => 1024, v_front =>  1, v_sync =>   3, v_back =>  38,
       sync_active => '1');
 
+   -- The text memory of text.vhd (in the package, so testbenches can read it)
+   type text_mem_t is array (0 to 4095) of std_logic_vector(8 downto 0);
+
    -- The latencies of the parts of the picture, in clock cycles from the
    -- pixel counters (pix.vhd): the board (board.vhd) and the text
    -- (text.vhd). vga.vhd delays the sync signals to match.

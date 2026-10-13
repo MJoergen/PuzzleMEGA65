@@ -35,8 +35,8 @@ use work.ctrl_pkg.all;
 
 entity control is
    generic (
-      G_ENGINES     : natural_vector(0 to C_NUM_PUZZLES-1);
-      G_SLOW_CYCLES : positive                    -- Clock cycles between slow steps
+      G_ENGINES     : natural_vector(0 to C_NUM_PUZZLES-1) := C_ENGINES_MEGA65;
+      G_SLOW_CYCLES : positive := 100             -- Clock cycles between slow steps
    );
    port (
       clk_i         : in  std_logic;
@@ -46,7 +46,8 @@ entity control is
       cmd_i         : in  cmd_t;
 
       -- From the solver
-      sol_i         : in  natural range 0 to 32;
+      sol_any_i     : in  std_logic;               -- Combinational, for the halt
+      sol_i         : in  natural range 0 to 32;   -- Two clock cycles later
       sol_ctx_i     : in  natural range 0 to 255;
       ctx_done_i    : in  std_logic_vector(0 to 255);
       done_i        : in  std_logic;
@@ -76,6 +77,7 @@ architecture rtl of control is
    signal halt_r      : std_logic := '0';
    signal finished_r  : std_logic := '0';
    signal solution_r  : std_logic := '0';    -- Stopped at a solution (mode "next")
+   signal shown_r     : std_logic := '0';    -- ... and its context is shown
    signal disp_r      : natural range 0 to 255 := 0;
 
    -- The restart: the reset of the solver, and the time until its outputs are
@@ -119,12 +121,16 @@ begin
                step_r   <= '0';
             end if;
 
-            -- A solution in the mode "next": stop at once, and show it
-            if sol_i /= 0 and mode_r = NEXT_ST then
+            -- A solution in the mode "next": stop at once, and show it (the
+            -- context of the solution comes two clock cycles later)
+            if sol_any_i = '1' and mode_r = NEXT_ST then
                halt_r     <= '1';
                mode_r     <= PAUSE_ST;
                solution_r <= '1';
-               disp_r     <= sol_ctx_i;
+            end if;
+            if sol_i /= 0 and solution_r = '1' and halt_r = '1' and shown_r = '0' then
+               disp_r  <= sol_ctx_i;
+               shown_r <= '1';
             end if;
 
             -- The end of the search
@@ -135,7 +141,11 @@ begin
 
             -- Show another context when the shown one is done
             if ctx_done_i(disp_r) = '1' and done_i = '0' then
-               disp_r <= (disp_r + 1) mod num_ctx(puzzle_r);
+               if disp_r + 1 >= num_ctx(puzzle_r) then
+                  disp_r <= 0;
+               else
+                  disp_r <= disp_r + 1;
+               end if;
             end if;
 
             -- The steps of the mode "slow"
@@ -153,6 +163,7 @@ begin
          if cmd_valid_i = '1' then
             halt_r     <= '0';
             solution_r <= '0';
+            shown_r    <= '0';
             slow_r     <= 0;
             case cmd_i.code is
                when C_CMD_PAUSE =>
@@ -221,7 +232,7 @@ begin
    run_o        <= '1' when (mode_r = ALL_ST or mode_r = NEXT_ST) and finished_r = '0' and
                             settle_r = 0 else '0';
    halt_o       <= halt_r;
-   credit_o     <= credit_r and not finished_r;
+   credit_o     <= credit_r and not finished_r when settle_r = 0 else '0';
    credit_ctx_o <= disp_r;
    disp_ctx_o   <= disp_r;
    searching_o  <= '1' when mode_r /= PAUSE_ST and finished_r = '0' else '0';

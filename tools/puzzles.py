@@ -37,18 +37,19 @@ import os
 #   name     : the file puzzles/<name>.txt
 #   depth    : the depth D at which the tree is split between the search
 #              contexts, see src/main/engine.vhd. Chosen with model.py.
-#   engines  : the number of engines working on the puzzle, see solver.vhd.
+#   engines  : the number of engines working on the puzzle on the MEGA65, and
+#   nexys      on the Nexys 4 DDR, see solver.vhd.
 #   title    : shown on the screen.
 PUZZLES = [
-    dict(name='8x8',   depth=4, engines=1, title='12 pentominoes and a square'),
-    dict(name='6x10',  depth=4, engines=1, title='12 pentominoes'),
-    dict(name='3x20',  depth=4, engines=1, title='12 pentominoes'),
-    dict(name='5x8',   depth=4, engines=1, title='10 tetrominoes'),
-    dict(name='7x7',   depth=3, engines=1, title='9 pentominoes and a square'),
-    dict(name='5x5',   depth=1, engines=1, title='5 pentominoes'),
-    dict(name='1x16',  depth=2, engines=1, title='8 pairs of squares'),
-    dict(name='1x27',  depth=2, engines=1, title='9 triples of squares'),
-    dict(name='16x16', depth=4, engines=1, title='19 large pieces'),
+    dict(name='8x8',   depth=4, engines=16, nexys=4, title='12 pentominoes and a square'),
+    dict(name='6x10',  depth=4, engines=8, nexys=2, title='12 pentominoes'),
+    dict(name='3x20',  depth=4, engines=8, nexys=2, title='12 pentominoes'),
+    dict(name='5x8',   depth=4, engines=4, nexys=1, title='10 tetrominoes'),
+    dict(name='7x7',   depth=3, engines=2, nexys=1, title='9 pentominoes and a square'),
+    dict(name='5x5',   depth=1, engines=1, nexys=1, title='5 pentominoes'),
+    dict(name='1x16',  depth=2, engines=1, nexys=1, title='8 pairs of squares'),
+    dict(name='1x27',  depth=2, engines=1, nexys=1, title='9 triples of squares'),
+    dict(name='16x16', depth=4, engines=2, nexys=1, title='19 large pieces'),
 ]
 
 # The number of pipeline stages of an engine, i.e. the number of search
@@ -71,11 +72,12 @@ TOP = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 class Puzzle:
     """A puzzle, read from puzzles/<name>.txt."""
 
-    def __init__(self, index, name, depth, engines, title):
+    def __init__(self, index, name, depth, engines, nexys, title):
         self.index = index
         self.name = name
         self.depth = depth
         self.engines = engines
+        self.nexys = nexys
         self.title = title
         self.rows, self.cols, self.pieces = read_file(
             os.path.join(TOP, 'puzzles', name + '.txt'))

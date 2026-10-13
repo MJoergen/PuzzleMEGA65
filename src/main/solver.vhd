@@ -11,8 +11,13 @@
 -- context (credit_ctx_i, hold_ctx_i). The results of each clock cycle are the
 -- number of counted nodes (count_o, at most one for each engine), the number
 -- of solutions (sol_o), and the context of the solution of the lowest engine
--- that has one (sol_ctx_o). These are combinational, from the last stage of
--- the engines, so that the halt can be registered in the same clock cycle.
+-- that has one (sol_ctx_o), two clock cycles later (registered twice: the
+-- bits of the engines, and the sums). Only sol_any_o, whether any engine
+-- commits a solution, is combinational (from the last stage of the engines,
+-- an OR of all the engines of all the puzzles, without a multiplexer), so
+-- that the halt can be registered in the same clock cycle (control.vhd). The
+-- engines of the puzzles that are not selected are in reset, so their
+-- outputs are low.
 --
 -- The targets: when a context owns a node at the depth of the split, it
 -- claims a new target (engine.vhd). The claims of a clock cycle are
@@ -24,10 +29,11 @@
 -- claimed_o is the number of subtrees handed out, used for the progress.
 --
 -- The solver also shows which contexts are done (ctx_done_o) and whether all
--- of them are done (done_o). These are only valid a few clock cycles after a
--- reset, see control.vhd. The path of a context (path_*) is read through the
--- read port of its engine, which is registered, so the data is valid in the
--- clock cycle after the address.
+-- of them are done (done_o), and which have a pass in the pipeline (busy_o).
+-- These are registered, and only valid a few clock cycles after a reset, see
+-- control.vhd. The path of a context (path_*) is read through the read port
+-- of its engine, which is registered, and then registered again here, so
+-- the data is valid two clock cycles after the address.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -55,6 +61,7 @@ entity solver is
       count_o       : out natural range 0 to 32;
       sol_o         : out natural range 0 to 32;
       sol_ctx_o     : out natural range 0 to 255;
+      sol_any_o     : out std_logic;
       claimed_o     : out std_logic_vector(31 downto 0);
 
       busy_o        : out std_logic_vector(0 to 255);
@@ -108,14 +115,19 @@ architecture structural of solver is
                                  vis    => (others => (others => '0')));
 
    signal eng          : eng_vector;
-   signal sel          : eng_t;
+   signal sel_r        : eng_t;
 
    -- Registered locally, and per puzzle
    signal rst_r        : std_logic_vector(0 to C_NUM_PUZZLES-1);
 
-   -- The claims of the last clock cycle, the grants, and the counter
+   -- The results of the engines of the last clock cycle: the counted nodes,
+   -- the solutions, the claims, and the context in the last stage
+   signal count_r      : std_logic_vector(0 to C_E-1);
+   signal sol_r        : std_logic_vector(0 to C_E-1);
    signal claim_r      : std_logic_vector(0 to C_E-1);
-   signal claim_ctx_r  : std_logic_vector(C_CTX_BITS-1 downto 0);
+   signal ctx_r        : natural range 0 to C_STAGES-1;
+
+   -- The grants and the counter
    signal grant_r      : std_logic_vector(0 to C_E-1);
    signal grant_ctx_r  : std_logic_vector(C_CTX_BITS-1 downto 0);
    signal grant_tgt_r  : slv32_vector(0 to C_E-1);
@@ -201,31 +213,80 @@ begin
 
    end generate gen_puzzle;
 
-   sel <= eng(puzzle_i);
+   -- The registered outputs of the selected puzzle
+   p_sel : process (clk_i)
+   begin
+      if rising_edge(clk_i) then
+         sel_r <= eng(puzzle_i);
+      end if;
+   end process p_sel;
 
 
    --------------------------------------------------
    -- The results of the selected puzzle
    --------------------------------------------------
 
-   p_results : process (all)
+   -- Any solution of any engine, for the halt
+   p_sol_any : process (all)
+      variable any_v : std_logic;
+   begin
+      any_v := '0';
+      for p in 0 to C_NUM_PUZZLES-1 loop
+         any_v := any_v or (or eng(p).sol);
+      end loop;
+      sol_any_o <= any_v;
+   end process p_sol_any;
+
+   -- The bits of the engines (an OR of the puzzles, as only the selected one
+   -- has results), and then the sums
+   p_results : process (clk_i)
       variable count_v : natural range 0 to 32;
       variable sol_v   : natural range 0 to 32;
+      variable ctx_v   : natural range 0 to 255;
    begin
-      count_v   := 0;
-      sol_v     := 0;
-      sol_ctx_o <= 0;
-      for e in C_E-1 downto 0 loop
-         if sel.count(e) = '1' then
-            count_v := count_v + 1;
+      if rising_edge(clk_i) then
+         for e in 0 to C_E-1 loop
+            count_r(e) <= '0';
+            sol_r(e)   <= '0';
+            claim_r(e) <= '0';
+            for p in 0 to C_NUM_PUZZLES-1 loop
+               if eng(p).count(e) = '1' then
+                  count_r(e) <= '1';
+               end if;
+               if eng(p).sol(e) = '1' then
+                  sol_r(e) <= '1';
+               end if;
+               if eng(p).claim(e) = '1' then
+                  claim_r(e) <= '1';
+               end if;
+            end loop;
+         end loop;
+         ctx_r <= to_integer(eng(puzzle_i).ctx(0));
+
+         count_v := 0;
+         sol_v   := 0;
+         ctx_v   := 0;
+         for e in C_E-1 downto 0 loop
+            if count_r(e) = '1' then
+               count_v := count_v + 1;
+            end if;
+            if sol_r(e) = '1' then
+               sol_v := sol_v + 1;
+               ctx_v := e * C_STAGES + ctx_r;
+            end if;
+         end loop;
+         count_o   <= count_v;
+         sol_o     <= sol_v;
+         sol_ctx_o <= ctx_v;
+
+         if rst_i = '1' then
+            count_r <= (others => '0');
+            sol_r   <= (others => '0');
+            claim_r <= (others => '0');
+            count_o <= 0;
+            sol_o   <= 0;
          end if;
-         if sel.sol(e) = '1' then
-            sol_v     := sol_v + 1;
-            sol_ctx_o <= e * C_STAGES + to_integer(sel.ctx(e));
-         end if;
-      end loop;
-      count_o <= count_v;
-      sol_o   <= sol_v;
+      end if;
    end process p_results;
 
 
@@ -237,9 +298,6 @@ begin
       variable n_v : natural range 0 to C_E;
    begin
       if rising_edge(clk_i) then
-         claim_r     <= sel.claim;
-         claim_ctx_r <= sel.ctx(0);
-
          -- The number of claims of the lower engines is added to the counter
          n_v := 0;
          for e in 0 to C_E-1 loop
@@ -249,11 +307,10 @@ begin
             end if;
          end loop;
          grant_r     <= claim_r;
-         grant_ctx_r <= claim_ctx_r;
+         grant_ctx_r <= to_slv(ctx_r, C_CTX_BITS);
          claimed_r   <= claimed_r + n_v;
 
          if rst_i = '1' then
-            claim_r   <= (others => '0');
             grant_r   <= (others => '0');
             claimed_r <= to_slv(C_STAGES * G_ENGINES(puzzle_i), 32);
          end if;
@@ -268,7 +325,10 @@ begin
    p_path : process (clk_i)
    begin
       if rising_edge(clk_i) then
-         path_e_r <= path_ctx_i / C_STAGES;
+         path_e_r      <= path_ctx_i / C_STAGES;
+         path_anchor_o <= sel_r.anchor(path_e_r);
+         path_slot_o   <= sel_r.slot(path_e_r);
+         path_vis_o    <= sel_r.vis(path_e_r);
       end if;
    end process p_path;
 
@@ -276,14 +336,11 @@ begin
    begin
       busy_o     <= (others => '0');
       ctx_done_o <= (others => '1');
-      busy_o(0 to C_NUM_CTX-1)     <= sel.busy;
-      ctx_done_o(0 to C_NUM_CTX-1) <= sel.cdone;
+      busy_o(0 to C_NUM_CTX-1)     <= sel_r.busy;
+      ctx_done_o(0 to C_NUM_CTX-1) <= sel_r.cdone;
    end process p_outputs;
 
-   claimed_o     <= claimed_r;
-   done_o        <= and sel.cdone;
-   path_anchor_o <= sel.anchor(path_e_r);
-   path_slot_o   <= sel.slot(path_e_r);
-   path_vis_o    <= sel.vis(path_e_r);
+   claimed_o <= claimed_r;
+   done_o    <= and sel_r.cdone;
 
 end architecture structural;
