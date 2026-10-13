@@ -1,7 +1,9 @@
 -- This is a self-checking testbench of the search engine (engine.vhd). It
 -- runs the whole search of several puzzles, each by its own engine with its 8
--- contexts (G_NUM_CTX = 8, as in the design), with run_i high all the time,
--- and checks it against the model (tools/model.cpp):
+-- contexts, with run_i high all the time, and checks it against the model
+-- (tools/model.cpp) with one engine. The testbench hands out the targets like
+-- the solver: a claim is granted in the next clock cycle, with the next value
+-- of a counter that starts at 8. It checks:
 -- * For the puzzles in C_TRACED, every committed pass of every context: the
 --   level of the visited node, the anchor and the slot of its last piece, and
 --   whether it is counted, skipped, and a solution, against the trace of the
@@ -77,7 +79,11 @@ begin
       signal anchor     : std_logic_vector(8 downto 0);
       signal slot       : std_logic_vector(7 downto 0);
       signal skip       : std_logic;
+      signal claim      : std_logic;
       signal done       : std_logic;
+      signal grant      : std_logic := '0';
+      signal grant_ctx  : std_logic_vector(2 downto 0);
+      signal grant_tgt  : std_logic_vector(31 downto 0);
 
       -- Each context sets its bit when its trace is used up
       signal trace_done : std_logic_vector(0 to C_STAGES-1) := (others => '0');
@@ -94,11 +100,24 @@ begin
 
    begin
 
+      -- The counter of the targets
+      p_grant : process (clk)
+         variable tgt_v : natural := C_STAGES;
+      begin
+         if rising_edge(clk) then
+            grant <= claim;
+            if claim = '1' then
+               grant_ctx <= ctx;
+               grant_tgt <= to_slv(tgt_v, 32);
+               tgt_v     := tgt_v + 1;
+            end if;
+         end if;
+      end process p_grant;
+
       i_engine : entity work.engine
          generic map (
             G_PUZZLE  => C_PUZ,
-            G_FIRST   => 0,
-            G_NUM_CTX => C_STAGES
+            G_FIRST   => 0
          )
          port map (
             clk_i         => clk,
@@ -109,17 +128,20 @@ begin
             credit_ctx_i  => "000",
             hold_i        => '0',
             hold_ctx_i    => "000",
+            grant_i       => grant,
+            grant_ctx_i   => grant_ctx,
+            grant_tgt_i   => grant_tgt,
             ctx_o         => ctx,
             commit_o      => commit,
             count_o       => count,
             sol_o         => sol,
-            jcount_o      => open,
-            cdone_o       => open,
+            claim_o       => claim,
             lvl_o         => lvl,
             anchor_o      => anchor,
             slot_o        => slot,
             skip_o        => skip,
             busy_o        => open,
+            ctx_done_o    => open,
             done_o        => done,
             path_ctx_i    => "000",
             path_lvl_i    => "00000",

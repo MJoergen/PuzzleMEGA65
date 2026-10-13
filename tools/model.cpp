@@ -1,33 +1,46 @@
-// The reference model of the search of the hardware (src/main/engine.vhd).
+// The reference model of the search of the hardware (src/main/engine.vhd and
+// src/main/solver.vhd).
 //
 // It reads the slots of a puzzle (written by tools/model.py from
 // tools/puzzles.py), and searches exactly like the hardware: the board is a
 // window of W bits starting at the anchor (the lowest empty square), a node
 // has the bit vector F of the slots that fit at its anchor, and every pass
-// visits one node (the lowest remaining child of the current node). The tree
-// is split at the depth D between NCTX contexts, see engine.vhd:
-// * every context walks the levels 1 to D (only context 0 counts the nodes
-//   above D, and its solutions),
-// * the subtree of the j-th node at depth D (counted from 0, in the order of
-//   the search) belongs to context j mod NCTX; the other contexts visit the
-//   node but skip it (no children, not counted),
-// * the root is counted once.
-// With NCTX = 1 this is the search of the C++ program, in the same order.
+// visits one node (the lowest remaining child of the current node).
+//
+// The tree is split at the depth D between the contexts: E engines with 8
+// contexts each, numbered g = 8 * engine + id. Every context walks the tree
+// down to the depth D (only context 0 counts the nodes above D, and their
+// solutions; the root is counted once). The nodes at depth D are numbered
+// j = 0, 1, ... in the order of the search, and each context has a target:
+// it owns (searches) the subtree of node j when j is its target, and skips
+// the other nodes at depth D (visits them, but gives them no children, and
+// does not count them). When a context owns a node, it claims a new target
+// from a global counter. At the start, the target of context g is g, and the
+// counter is the number of contexts.
+//
+// The contexts are stepped one pass at a time in the order of the hardware:
+// in each round, the contexts with id 0 to 7, and for each id the engines 0
+// to E-1 (the engines commit the same id in the same clock cycle, and the
+// claims of one clock cycle are granted in the order of the engines). So the
+// claims, and the traces, are exactly those of the hardware, when it runs
+// freely (run_i high all the time). The command "seq" is one context without
+// a split, i.e. the search of the C++ program, in the same order.
 //
 // Usage: model <slots file> <command> [args]
-//   run <nctx> <depth>         Counts of every context: passes, nodes, solutions
-//   trace <nctx> <depth> <ctx> <n>
-//                              The first n passes of the context, one per
-//                              line: level of the child, anchor, slot, flags
-//   firsts <nctx> <depth>      For each context the number of passes until
+//   run <engines> <depth>      Counts of every context: passes, nodes,
+//                              solutions, and the totals
+//   trace <engines> <depth> <prefix>
+//                              Writes every pass of every context g to
+//                              <prefix>_<g>.trace, one per line: level of the
+//                              child, anchor, slot, counted, skipped, solution
+//   firsts <engines> <depth>   For each context the number of passes until
 //                              (and including) its first solution, 0 if none
-//   solutions <n>              The first n solutions (NCTX = 1), as boards
+//   seq                        One context (the C++ program): the counts
+//   solutions <n>              The first n solutions of "seq", as boards
 //   subtrees <maxdepth>        For each depth up to maxdepth: the number of
 //                              nodes, and the size of the subtree of each
-//                              node (in the order of the search), see
-//                              model.py (choosing the depth)
-//   frontier <depth>           The number of nodes at the depth (a search
-//                              that stops at that depth)
+//                              node (in the order of the search)
+//   frontier <depth>           The number of nodes at the depth
 
 #include <bitset>
 #include <cstdint>
@@ -125,9 +138,7 @@ static fvec_t children(int base, const window_t &win, uint32_t used)
    return f;
 }
 
-// The search of one context. The callback is called for every pass, with the
-// level of the visited child, the child, whether it is counted, skipped, and
-// a solution. It returns false to stop the search.
+// One pass
 struct Pass
 {
    int  level;     // Of the visited child (1 to num_pieces)
@@ -138,60 +149,104 @@ struct Pass
    bool solution;
 };
 
-template <class F>
-static void search(int nctx, int depth, int ctx, F callback)
+// A search context
+struct Context
 {
-   std::vector<Node> stack(num_pieces + 1);
-   stack[0].base = 0;
-   stack[0].win.reset();
-   stack[0].used = 0;
-   stack[0].f = children(0, stack[0].win, 0);
-   int level = 0;
-   long j = 0;  // The number of nodes at the depth so far
-   if (stack[0].f.none())
-      return;
-   while (true)
+   int               gid;     // Global number
+   std::vector<Node> stack;
+   int               level;   // Of the current node
+   long              j;       // Nodes at depth D so far
+   long              target;  // The node at depth D to search next
+   bool              done;
+   long              passes, nodes, solutions, first;
+
+   explicit Context(int g) :
+      gid(g), stack(num_pieces + 1), level(0), j(0), target(g), done(false),
+      passes(0), nodes(0), solutions(0), first(0)
+   {
+      stack[0].base = 0;
+      stack[0].win.reset();
+      stack[0].used = 0;
+      stack[0].f = children(0, stack[0].win, 0);
+      done = stack[0].f.none();
+   }
+
+   // One pass. With a depth of 0 there is no split (one context). A claim
+   // takes the next target from the counter.
+   Pass step(int depth, long &counter)
    {
       Node &n = stack[level];
       int k = n.f._Find_first();
       n.f.reset(k);
       n.slot = k;
-      // The child
       window_t c = n.win | slots[k].mask;
       int t = (~c)._Find_first();
       Node &child = stack[level + 1];
       child.win = c >> t;
       child.base = n.base + t;
       child.used = n.used | (1u << slots[k].piece);
-      int lvl = level + 1;
       Pass p;
-      p.level = lvl;
+      p.level = level + 1;
       p.anchor = n.base;
       p.slot = k;
       p.skipped = false;
-      if (lvl == depth)
+      if (p.level == depth)
       {
-         p.skipped = (j % nctx) != ctx;
+         bool owned = j == target;
+         p.skipped = !owned;
          ++j;
+         if (owned)
+            target = counter++;
       }
-      p.counted = lvl < depth ? ctx == 0 : !p.skipped;
-      p.solution = p.counted && lvl == num_pieces && child.base == squares;
-      if (!p.skipped && lvl < num_pieces)
+      p.counted = p.level < depth ? gid == 0 : !p.skipped;
+      p.solution = p.counted && p.level == num_pieces && child.base == squares;
+      if (!p.skipped && p.level < num_pieces)
          child.f = children(child.base, child.win, child.used);
       else
          child.f.reset();
-      if (!callback(p, stack))
-         return;
       if (child.f.any())
-         level = lvl;
+         level = p.level;
       else
       {
          while (level >= 0 && stack[level].f.none())
             --level;
          if (level < 0)
-            return;
+            done = true;
       }
+      ++passes;
+      nodes += p.counted;
+      solutions += p.solution;
+      if (p.solution && first == 0)
+         first = passes;
+      return p;
    }
+};
+
+// The search of all the contexts, in the order of the hardware. The callback
+// gets every pass.
+template <class F>
+static std::vector<Context> search(int engines, int depth, F callback)
+{
+   std::vector<Context> ctx;
+   for (int g = 0; g < 8 * engines; ++g)
+      ctx.emplace_back(g);
+   long counter = 8 * engines;
+   bool busy = true;
+   while (busy)
+   {
+      busy = false;
+      for (int id = 0; id < 8; ++id)
+         for (int e = 0; e < engines; ++e)
+         {
+            Context &x = ctx[8 * e + id];
+            if (x.done)
+               continue;
+            busy = true;
+            Pass p = x.step(depth, counter);
+            callback(x, p);
+         }
+   }
+   return ctx;
 }
 
 int main(int argc, char **argv)
@@ -204,65 +259,70 @@ int main(int argc, char **argv)
    read_slots(argv[1]);
    std::string cmd = argv[2];
 
-   if (cmd == "run" && argc == 5)
+   if ((cmd == "run" || cmd == "firsts") && argc == 5)
    {
-      int nctx = atoi(argv[3]), depth = atoi(argv[4]);
-      long tot_nodes = 1, tot_sol = 0, max_passes = 0;
-      for (int x = 0; x < nctx; ++x)
+      int engines = atoi(argv[3]), depth = atoi(argv[4]);
+      auto ctx = search(engines, depth, [](const Context &, const Pass &) {});
+      long nodes = 1, sol = 0, max_passes = 0;
+      for (const Context &x : ctx)
       {
-         long passes = 0, nodes = 0, sol = 0;
-         search(nctx, depth, x, [&](const Pass &p, const std::vector<Node> &) {
-            ++passes;
-            nodes += p.counted;
-            sol += p.solution;
-            return true;
-         });
-         printf("ctx %d passes %ld nodes %ld solutions %ld\n", x, passes, nodes, sol);
-         tot_nodes += nodes;
-         tot_sol += sol;
-         if (passes > max_passes)
-            max_passes = passes;
+         if (cmd == "run")
+            printf("ctx %d passes %ld nodes %ld solutions %ld\n", x.gid, x.passes, x.nodes,
+                   x.solutions);
+         else
+            printf("%ld\n", x.first);
+         nodes += x.nodes;
+         sol += x.solutions;
+         if (x.passes > max_passes)
+            max_passes = x.passes;
       }
-      printf("total nodes %ld solutions %ld max_passes %ld\n", tot_nodes, tot_sol, max_passes);
+      if (cmd == "run")
+         printf("total nodes %ld solutions %ld max_passes %ld\n", nodes, sol, max_passes);
    }
-   else if (cmd == "trace" && argc == 7)
+   else if (cmd == "trace" && argc == 6)
    {
-      int nctx = atoi(argv[3]), depth = atoi(argv[4]), ctx = atoi(argv[5]);
-      long n = atol(argv[6]), i = 0;
-      search(nctx, depth, ctx, [&](const Pass &p, const std::vector<Node> &) {
-         printf("%d %d %d %d %d %d\n", p.level, p.anchor, p.slot, p.counted, p.skipped,
-                p.solution);
-         return ++i < n;
+      int engines = atoi(argv[3]), depth = atoi(argv[4]);
+      std::vector<FILE *> f;
+      for (int g = 0; g < 8 * engines; ++g)
+      {
+         std::string name = std::string(argv[5]) + "_" + std::to_string(g) + ".trace";
+         f.push_back(fopen(name.c_str(), "w"));
+         if (!f.back())
+         {
+            std::cerr << "Cannot write " << name << std::endl;
+            return 1;
+         }
+      }
+      search(engines, depth, [&](const Context &x, const Pass &p) {
+         fprintf(f[x.gid], "%d %d %d %d %d %d\n", p.level, p.anchor, p.slot, p.counted,
+                 p.skipped, p.solution);
       });
+      for (FILE *fp : f)
+         fclose(fp);
    }
-   else if (cmd == "firsts" && argc == 5)
+   else if (cmd == "seq" && argc == 3)
    {
-      int nctx = atoi(argv[3]), depth = atoi(argv[4]);
-      for (int x = 0; x < nctx; ++x)
-      {
-         long i = 0, first = 0;
-         search(nctx, depth, x, [&](const Pass &p, const std::vector<Node> &) {
-            ++i;
-            if (p.solution)
-            {
-               first = i;
-               return false;
-            }
-            return true;
-         });
-         printf("%ld\n", first);
-      }
+      Context x(0);
+      long counter = 1;
+      while (!x.done)
+         x.step(0, counter);
+      printf("total nodes %ld solutions %ld max_passes %ld\n", x.nodes + 1, x.solutions,
+             x.passes);
    }
    else if (cmd == "solutions" && argc == 4)
    {
       long n = atol(argv[3]), i = 0;
-      search(1, 1, 0, [&](const Pass &p, const std::vector<Node> &stack) {
+      Context x(0);
+      long counter = 1;
+      while (!x.done && i < n)
+      {
+         Pass p = x.step(0, counter);
          if (!p.solution)
-            return true;
+            continue;
          std::vector<int> board(squares, -1);
          for (int l = 0; l < p.level; ++l)
-            for (int o : slots[stack[l].slot].offsets)
-               board[stack[l].base + o] = slots[stack[l].slot].piece;
+            for (int o : slots[x.stack[l].slot].offsets)
+               board[x.stack[l].base + o] = slots[x.stack[l].slot].piece;
          for (int r = 0; r < rows; ++r)
          {
             for (int c = 0; c < cols; ++c)
@@ -270,8 +330,8 @@ int main(int argc, char **argv)
             printf("\n");
          }
          printf("\n");
-         return ++i < n;
-      });
+         ++i;
+      }
    }
    else if (cmd == "subtrees" && argc == 4)
    {
@@ -284,7 +344,6 @@ int main(int argc, char **argv)
       std::vector<int> open(num_pieces + 2, 0);
       long count = 1;  // Nodes visited so far, including the root
       auto close = [&](int lvl) {
-         // Close the open nodes at lvl and below
          for (int l = num_pieces + 1; l >= lvl; --l)
             if (open[l])
             {
@@ -293,13 +352,16 @@ int main(int argc, char **argv)
                open[l] = 0;
             }
       };
-      search(1, 1, 0, [&](const Pass &p, const std::vector<Node> &) {
+      Context x(0);
+      long counter = 1;
+      while (!x.done)
+      {
+         Pass p = x.step(0, counter);
          close(p.level);
          open[p.level] = 1;
          start[p.level] = count;
          ++count;
-         return true;
-      });
+      }
       close(1);
       printf("nodes %ld\n", count);
       for (int d = 1; d <= maxdepth; ++d)
@@ -312,14 +374,14 @@ int main(int argc, char **argv)
    }
    else if (cmd == "frontier" && argc == 4)
    {
-      // A search that does not go below the depth: context -1 skips every
-      // node at the depth.
+      // A context whose target is never reached skips every node at the
+      // depth, so it only walks the tree above it.
       int depth = atoi(argv[3]);
-      long n = 0;
-      search(1, depth, -1, [&](const Pass &p, const std::vector<Node> &) {
-         n += p.level == depth;
-         return true;
-      });
+      Context x(0);
+      x.target = -1;
+      long counter = 0, n = 0;
+      while (!x.done)
+         n += x.step(depth, counter).level == depth;
       printf("frontier %ld\n", n);
    }
    else

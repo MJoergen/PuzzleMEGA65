@@ -193,3 +193,56 @@ the same counts, a step is one position).
 * **Video.** 1280x1024 @ 60 Hz (108 MHz), as in MandelbrotMEGA65, on VGA and
   HDMI, and also on the Nexys 4 DDR (no frame buffer is needed, so the
   resolution costs nothing).
+
+## 5. The model and the first engine
+
+* `tools/puzzles.py` reads the puzzles like the C++ program, builds the
+  placements like it, and groups them into slots. For every anchor of every
+  puzzle it checks that the slots give exactly the placements of the C++
+  program, in the same order. All 9 puzzles pass.
+* `tools/model.cpp` searches exactly like the hardware (window, slots, one
+  node per pass, contexts). With one context it gives exactly the counts of
+  the C++ program for all 8 puzzles that can be searched (`model.py check`,
+  2.3 minutes), and the solutions come in the same order.
+* Choosing the depth of the split (`model.py depth`): with 8 contexts and the
+  static split (subtree j to context j mod 8), depth 4 gives 97 to 99 % of the
+  ideal speed for 8x8, 6x10, and 3x20. With 16 to 64 contexts the static
+  split gets worse (8x8: 95 % at 16, 89 % at 64 contexts), because every
+  context walks the whole tree above the split and the subtrees differ a lot
+  in size.
+* `src/main/engine.vhd`, first version: 8 stages, 8 contexts, and
+  `sim/engine_tb.vhd` checks every single pass of every context of 5x5, 1x16,
+  1x27, and 7x7 against traces of the model. All pass, with the exact counts,
+  and with 8 clock cycles per pass of the slowest context.
+* Simulation speed: the first version (one process per stage, a record signal
+  between the stages) simulated at only 2,600 clock cycles per second in
+  GHDL, as every bit of every stage register is a signal. Rewritten so that
+  each stage is a pure function and one process moves the ring of registers
+  (variables), and with the fit test and the encoder written to loop only
+  over the bits that matter: 15,000 cycles per second, the same logic for
+  synthesis. engine_tb now takes 2 minutes instead of 7.6.
+* First out-of-context Vivado runs at 250 MHz (4.0 ns): 8x8 fails by
+  0.39 ns, in the commit stage (the OR of the 64 children, a carry chain, and
+  then the next level); 16x16 fails by 2.5 ns, in the count of the trailing
+  ones (`lowest_one` as v and -v is a 130-bit carry chain, 32 CARRY4). But
+  the engines are small: 8x8 is 1,100 LUTs and 1,400 registers, 16x16 is
+  3,000 LUTs and 3,300 registers.
+
+### Decision: many engines, and dynamic splitting
+
+Because the engines are so small, the speed comes from having many engines
+per puzzle, not from the last MHz. But with many contexts the static split
+loses a lot. So the split is changed to a dynamic one, which is still exact:
+a global counter in the solver hands out the subtrees at depth D. Every
+context walks the tree above D (only context 0 counts it), and owns the
+subtree of a node at depth D when the node's index is its target; it then
+claims a new target from the counter at once (the grant arrives a few clock
+cycles later, long before the context's next node at depth D). The model
+simulates the contexts in the same order as the hardware (pass by pass,
+context 0 to 7, engine 0 to E-1), so its traces stay exact.
+
+At the same time the engine is made faster: the next-state decision moves
+from stage 7 to stage 0 (stage 7 only ORs the children and writes the stack,
+which can be written unconditionally), the stack becomes distributed RAM
+with an asynchronous read (stage 1), and the wide priority logic uses groups
+of 8 bits instead of one long carry chain.

@@ -8,13 +8,15 @@ Usage: tools/model.py <command>
   check            Runs the whole search of every puzzle (but 16x16) with one
                    context, and checks the counts against those of the C++
                    program (KNOWN below). About 3 minutes.
-  depth <name> [<nctx>...]
-                   For the puzzle <name>, the number of passes of the slowest
-                   context for each depth at which the tree is split, i.e. the
-                   time of the search, for each number of contexts (default:
-                   that of the puzzle, STAGES * engines, see puzzles.py).
-  run <name>       The counts of every context of the puzzle, as split in
-                   puzzles.py.
+  depth <name> <engines> <depth>...
+                   For the puzzle <name> and the number of engines, the
+                   passes of the slowest context for each depth at which the
+                   tree is split, i.e. the time of the search, and the
+                   efficiency (the nodes per context of a perfect split,
+                   divided by that). One whole search for each depth.
+  run <name> [<engines>]
+                   The counts of every context of the puzzle (default: the
+                   engines of the puzzle in puzzles.py), split at its depth.
   frontier         The number of nodes at the depth of the split of every
                    puzzle, as used by src/main/puzzle_pkg.vhd.
 """
@@ -72,11 +74,11 @@ def model(p, *args):
     return out.splitlines()
 
 
-def run(p, nctx, depth):
+def run(p, engines, depth):
     """The counts of each context and the totals."""
     ctx = []
     total = None
-    for line in model(p, 'run', nctx, depth):
+    for line in model(p, 'run', engines, depth):
         w = line.split()
         if w[0] == 'ctx':
             ctx.append(dict(passes=int(w[3]), nodes=int(w[5]), solutions=int(w[7])))
@@ -89,8 +91,10 @@ def frontier(p, depth):
     return int(model(p, 'frontier', depth)[0].split()[1])
 
 
-def nctx(p):
-    return puzzles.STAGES * p.engines
+def seq(p):
+    """The totals of the search with one context, i.e. of the C++ program."""
+    w = model(p, 'seq')[0].split()
+    return dict(nodes=int(w[2]), solutions=int(w[4]), max_passes=int(w[6]))
 
 
 def main(args):
@@ -99,37 +103,32 @@ def main(args):
         ok = True
         for name, (nodes, solutions) in KNOWN.items():
             p = by_name[name]
-            _, total = run(p, 1, 1)
+            total = seq(p)
             good = (total['nodes'], total['solutions']) == (nodes, solutions)
             ok &= good
             print(f"{name:6} nodes {total['nodes']:>14,} solutions {total['solutions']:>8,}"
                   f"  {'OK' if good else 'WRONG, expected ' + str((nodes, solutions))}")
         sys.exit(0 if ok else 1)
-    elif len(args) >= 2 and args[0] == 'depth':
+    elif len(args) >= 4 and args[0] == 'depth':
         p = by_name[args[1]]
-        lines = model(p, 'subtrees', min(6, len(p.pieces)))
-        total = int(lines[0].split()[1])
-        for n in [int(a) for a in args[2:]] or [nctx(p)]:
-            above = 0
-            print(f'{p.name}: {total:,} nodes, {n} contexts, ideal {total / n:,.0f} passes each')
-            for line in lines[1:]:
-                w = line.split()
-                d = int(w[1])
-                sizes = [int(s) for s in w[3:]]
-                above += len(sizes)
-                passes = [above + sum(s - 1 for s in sizes[x::n]) for x in range(n)]
-                worst = max(passes)
-                print(f'  depth {d}: {len(sizes):>10,} nodes, slowest context {worst:>14,}'
-                      f' passes, efficiency {total / n / worst:6.1%}')
-    elif len(args) == 2 and args[0] == 'run':
+        engines = int(args[2])
+        n = puzzles.STAGES * engines
+        for d in [int(a) for a in args[3:]]:
+            _, total = run(p, engines, d)
+            print(f"{p.name}: {engines} engines, depth {d}: frontier {frontier(p, d):>10,},"
+                  f" slowest context {total['max_passes']:>13,} passes,"
+                  f" efficiency {total['nodes'] / n / total['max_passes']:6.1%}", flush=True)
+    elif len(args) in (2, 3) and args[0] == 'run':
         p = by_name[args[1]]
-        ctx, total = run(p, nctx(p), p.depth)
+        engines = int(args[2]) if len(args) == 3 else p.engines
+        ctx, total = run(p, engines, p.depth)
         for x, c in enumerate(ctx):
-            print(f"ctx {x:2}: passes {c['passes']:>14,} nodes {c['nodes']:>14,}"
+            print(f"ctx {x:3}: passes {c['passes']:>14,} nodes {c['nodes']:>14,}"
                   f" solutions {c['solutions']:>8,}")
+        n = puzzles.STAGES * engines
         print(f"total: nodes {total['nodes']:,} solutions {total['solutions']:,}"
               f" slowest {total['max_passes']:,} passes,"
-              f" efficiency {total['nodes'] / nctx(p) / total['max_passes']:.1%}")
+              f" efficiency {total['nodes'] / n / total['max_passes']:.1%}")
     elif args == ['frontier']:
         for p in by_name.values():
             print(f'{p.name:6} depth {p.depth} frontier {frontier(p, p.depth):,}')

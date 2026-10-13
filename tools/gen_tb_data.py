@@ -14,7 +14,6 @@ Usage: python3 tools/gen_tb_data.py   (or "make tbdata", which "make sim" runs)
 """
 
 import os
-import subprocess
 
 import model
 import puzzles
@@ -56,10 +55,10 @@ def main():
     order = sorted(ps.values(), key=lambda p: p.index)
     for n, p in enumerate(order):
         end = ',' if n < len(order) - 1 else ');'
-        nctx = model.nctx(p)
+        nctx = puzzles.STAGES * p.engines
         if p.name in SIMULATED:
-            _, total = model.run(p, nctx, p.depth)
-            firsts = [int(x) for x in model.model(p, 'firsts', nctx, p.depth)]
+            _, total = model.run(p, p.engines, p.depth)
+            firsts = [int(x) for x in model.model(p, 'firsts', p.engines, p.depth)]
             firsts += [0] * (puzzles.STAGES * max(q.engines for q in order) - nctx)
             w(f"      {p.index} => (nodes => {total['nodes']}, solutions => {total['solutions']}, "
               f"max_passes => {total['max_passes']},  -- {p.name}")
@@ -68,10 +67,7 @@ def main():
             w(f'      {p.index} => (nodes => 0, solutions => 0, max_passes => 0, '
               f'first_sol => (others => 0)){end}  -- {p.name}')
         if p.name in TRACED:
-            for x in range(nctx):
-                with open(os.path.join(model.BUILD, f'{p.name}_{x}.trace'), 'w') as f:
-                    subprocess.run([model.MODEL, model.slots_file(p), 'trace', str(nctx),
-                                    str(p.depth), str(x), str(1 << 40)], check=True, stdout=f)
+            model.model(p, 'trace', p.engines, p.depth, os.path.join(model.BUILD, p.name))
     w('')
     w('end package model_pkg;')
     with open(os.path.join(model.BUILD, 'model_pkg.vhd'), 'w') as f:
