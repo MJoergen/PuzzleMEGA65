@@ -1,0 +1,15 @@
+# Simulation, synthesis, and model outputs
+build/
+*.ghw
+work-obj08.cf
+*.o
+.cache/
+*.swp
+__pycache__/
+.Xil/
+vivado*.jou
+vivado*.log
+# LaTeX intermediates of "make diagrams", if pdflatex fails
+doc/*.aux
+doc/*.log
+doc/*.pdf

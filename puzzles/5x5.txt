@@ -1,0 +1,51 @@
+# 8 solutions
+
+# Number of rows
+5
+
+# Number of columns
+5
+
+# Number of blocks
+5
+
+# M 
+5
+1 0
+1 1
+0 1
+0 2
+2 0
+
+# Z
+5
+0 0
+0 1
+1 1
+2 1
+2 2
+
+# L
+5
+2 0
+2 1
+2 2
+1 2
+0 2
+
+# TRIP
+5
+0 0
+0 1
+0 2
+0 3
+1 2
+
+# BOX
+5
+0 0
+1 0
+0 1
+1 1
+0 2
+
