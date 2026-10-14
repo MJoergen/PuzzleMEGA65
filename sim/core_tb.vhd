@@ -20,6 +20,10 @@
 --   counts of the model. Pause.
 -- * The statistics in the VGA clock domain (after a frame), and the text of
 --   the screen (status.vhd): the status and the number of positions.
+-- * Select 16x16, all: after two frames, the statistics in the VGA clock
+--   domain are those of the running search (the picture is made).
+-- * Select 5x5 while 16x16 runs, then all: exactly the counts of the model
+--   (no pass of the old puzzle is counted).
 --
 -- With G_PICTURES it also selects other puzzles and saves pictures of the
 -- screen for the README (build/core/*.ppm, see "make pictures"), which takes
@@ -50,14 +54,15 @@ architecture simulation of core_tb is
    constant C_VGA_PERIOD  : time := 9.259 ns;
    constant C_SLOW        : positive := 4000;          -- MAIN clock cycles
 
-   -- The engines: only 8x8 and the small puzzles, and for the pictures also
-   -- 6x10 and 16x16
+   -- The engines: only 8x8, 16x16, and the small puzzles, and for the
+   -- pictures also 6x10 (an engine that is not selected costs almost nothing
+   -- in simulation, see engine.vhd)
    function engines return natural_vector is
    begin
       if G_PICTURES then
          return (1, 1, 0, 0, 0, 1, 1, 1, 1);
       end if;
-      return (1, 0, 0, 0, 0, 1, 1, 1, 0);
+      return (1, 0, 0, 0, 0, 1, 1, 1, 1);
    end function engines;
 
    signal main_clk  : std_logic := '0';
@@ -306,6 +311,29 @@ begin
          wait_frames(2);
          picture("puzzle_5x5_finished");
       end if;
+
+      -- 16x16 searching: the picture and the statistics are made (the
+      -- snapshot of a context of the running 16x16 engine)
+      send(C_CMD_PUZZLE, 8);
+      send(C_CMD_ALL);
+      wait_frames(2);
+      st_v := to_stats(vga_stats);
+      assert to_integer(st_v.puzzle) = 8 and st_v.status = C_ST_ALL and
+             to_integer(st_v.positions) > 1
+         report "16x16 all: the statistics in the VGA clock domain are wrong, puzzle " &
+                integer'image(to_integer(st_v.puzzle)) & ", status " & to_string(st_v.status) &
+                ", " & integer'image(to_integer(st_v.positions)) & " positions"
+         severity failure;
+      report "16x16 all: " & integer'image(to_integer(st_v.positions)) &
+             " positions after two frames, OK";
+
+      -- 5x5 selected while 16x16 runs: the passes of the old puzzle are not
+      -- counted
+      send(C_CMD_PUZZLE, 5);
+      expect(1, 0, C_ST_PAUSED, "5x5 selected while 16x16 runs");
+      send(C_CMD_ALL);
+      wait_stop;
+      expect(C_MODEL(5).nodes, C_MODEL(5).solutions, C_ST_FINISHED, "5x5 all after 16x16");
 
       report "core_tb: finished";
       running <= '0';

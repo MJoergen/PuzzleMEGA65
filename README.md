@@ -6,7 +6,7 @@ This solves polyomino packing puzzles (e.g. the twelve pentominoes and a
 port of a C++ program, which finds all the solutions by a depth first
 search, and it finds exactly the same positions and solutions, only much
 faster: the 8x8 puzzle (853,260,456 positions, 129,168 solutions) takes
-about 0.27 seconds (estimated from the model) instead of 42.6 seconds for the C++ program on a fast PC.
+about 0.28 seconds (estimated from the model) instead of 42.6 seconds for the C++ program on a fast PC.
 
 The position being considered is shown in real time on the VGA and HDMI
 outputs (1280x1024 @ 60 Hz), with the number of positions considered, the
@@ -15,7 +15,18 @@ runs on the
 [Nexys 4 DDR](https://digilent.com/reference/programmable-logic/nexys-4-ddr/start)
 board (XC7A100T, with fewer search engines), see [Nexys 4 DDR](#nexys-4-ddr).
 
-@@PICTURES@@
+![8x8: the first solution found by N](doc/puzzle_8x8_solution.png)
+
+| | |
+| --- | --- |
+| ![8x8 after 7 single steps](doc/puzzle_8x8_steps.png) 8x8, after seven single steps (O) | ![6x10, the first solution](doc/puzzle_6x10_solution.png) 6x10, the first solution (N) |
+| ![16x16 while searching](doc/puzzle_16x16_search.png) 16x16, searching all positions (A) | ![5x5, finished](doc/puzzle_5x5_finished.png) 5x5, all solutions found |
+
+The pictures are from the simulation of the whole design (`make pictures`),
+with fewer engines and a slower MAIN clock than on the board, so the
+numbers (e.g. positions per second) are not those of the board. The empty
+squares are dark, the pieces have rounded outlines, and the colours of the
+pieces stay the same for each puzzle.
 
 ## The puzzles
 
@@ -27,11 +38,11 @@ different solutions), and the hardware gives exactly the same numbers.
 
 | Key | Puzzle | Pieces | Positions | Solutions | C++ program | MEGA65 (engines, time) |
 | --- | ------ | ------ | --------: | --------: | ----------: | ---------------------: |
-| 1 | 8x8   | 12 pentominoes and a 2x2 square | 853,260,456   | 129,168 | 42.6 s  | 16, 0.27 s |
-| 2 | 6x10  | 12 pentominoes                  | 349,226,636   |   9,356 | 14.7 s  |  8, 0.23 s |
-| 3 | 3x20  | 12 pentominoes                  | 1,528,716,954 |       8 | 57.4 s  |  8, 0.94 s |
-| 4 | 5x8   | 10 tetrominoes                  | 15,783,209    |  99,392 | 3.9 s   |  4, 22 ms  |
-| 5 | 7x7   | 9 pentominoes and a square      | 1,094,028     |     160 | 0.05 s  |  2, 2.9 ms |
+| 1 | 8x8   | 12 pentominoes and a 2x2 square | 853,260,456   | 129,168 | 42.6 s  | 16, 0.28 s |
+| 2 | 6x10  | 12 pentominoes                  | 349,226,636   |   9,356 | 14.7 s  |  8, 0.24 s |
+| 3 | 3x20  | 12 pentominoes                  | 1,528,716,954 |       8 | 57.4 s  |  8, 0.98 s |
+| 4 | 5x8   | 10 tetrominoes                  | 15,783,209    |  99,392 | 3.9 s   |  4, 23 ms  |
+| 5 | 7x7   | 9 pentominoes and a square      | 1,094,028     |     160 | 0.05 s  |  2, 3.0 ms |
 | 6 | 5x5   | 5 pentominoes                   | 372           |       8 | 0.0 s   |  1         |
 | 7 | 1x16  | 8 pairs of squares              | 8,787         |     300 | 0.0 s   |  1         |
 | 8 | 1x27  | 9 triples of squares            | 3,106         |       6 | 0.0 s   |  1         |
@@ -40,7 +51,7 @@ different solutions), and the hardware gives exactly the same numbers.
 The C++ times were measured on the build machine (`-O3 -march=native`,
 output to a file). The MEGA65 times are the passes of the slowest context in
 the model (`tools/model.py run <name>`), times 8 clock cycles, at
-205.7 MHz.
+196.4 MHz.
 
 The 16x16 puzzle is far too large to be searched to the end, but its first
 solutions are found quickly. The puzzles are in [`puzzles/`](puzzles), in
@@ -92,8 +103,8 @@ order, but:
   one by one by a global counter, to the context that asks first. The 8x8
   puzzle has 16 engines (128 contexts), and the split keeps 95 % of them busy.
 
-So the 8x8 puzzle runs at up to 16 positions per clock cycle, i.e. 3.3
-billion positions per second at 205.7 MHz. The model of the search
+So the 8x8 puzzle runs at up to 16 positions per clock cycle, i.e. 3.1
+billion positions per second at 196.4 MHz. The model of the search
 ([`tools/model.cpp`](tools/model.cpp), driven by
 [`tools/model.py`](tools/model.py)) simulates the contexts in exactly the
 order of the hardware, and the testbenches compare the hardware with it pass
@@ -110,7 +121,7 @@ of the pieces are spaced by the golden angle on the colour wheel.
 ### Architecture
 
 ```
-            MAIN clock domain (206 MHz)                 VGA clock domain (108 MHz)
+            MAIN clock domain (196 MHz)                 VGA clock domain (108 MHz)
  +---------------------------------------------+    +-------------------------------+
  | main                                        |    | vga                           |
  |  control  - modes, credits, shown context   |<---|  keys (MEGA65) / buttons      |
@@ -132,13 +143,13 @@ of the pieces are spaced by the golden angle on the colour wheel.
 
 ## Implementation results
 
-Vivado 2025.1, 5 threads per build, the R3 and R6 built at the same time:
+Vivado 2025.1, one build at a time with 8 threads (`make <board>`):
 
 | Board        | MAIN clock | WNS       | LUTs            | Registers       | BRAM | Build time |
 | ------------ | ---------: | --------: | --------------: | --------------: | ---: | ---------: |
-| MEGA65 R6    | 205.7 MHz  | +0.002 ns | 65,077 (48.6 %) | 84,515 (31.6 %) | 29   | 17 min     |
-| MEGA65 R3    | 205.7 MHz  | +0.027 ns | 65,132 (48.7 %) | 84,620 (31.6 %) | 29   | 17 min     |
-| Nexys 4 DDR  | 180 MHz    | @@NEXYS@@ |
+| MEGA65 R6    | 196.4 MHz  | +0.119 ns | 64,473 (48.2 %) | 84,499 (31.6 %) | 29   | 13.3 min   |
+| MEGA65 R3    | 196.4 MHz  | +0.073 ns | 64,600 (48.3 %) | 84,641 (31.6 %) | 29   | 14.8 min   |
+| Nexys 4 DDR  | 154.3 MHz  | +0.129 ns | 22,989 (36.3 %) | 28,730 (22.7 %) | 15   | 6.3 min    |
 
 The VGA clock is 108 MHz (1280x1024 @ 60 Hz). The engines are small (8x8:
 about 1,550 LUTs and 1,950 registers; 16x16: about 5,000 LUTs and 4,400
@@ -149,16 +160,16 @@ around them, see [LOG.md](LOG.md) (Timing closure) and [TODO.md](TODO.md).
 
 * `make mega65-r6`, `make mega65-r3`, `make nexys4ddr` build the bit-file
   `build/<board>/<board>.bit` with Vivado (the reports are in the same
-  folder). A build that does not meet timing writes no bit-file. The builds
-  can run at the same time, e.g. `make -j2 mega65-r3 mega65-r6` (each Vivado
-  uses `VIVADO_THREADS` = 5 threads).
+  folder). A build that does not meet timing writes no bit-file. Each
+  Vivado uses `VIVADO_THREADS` = 8 threads; to build two boards at the same
+  time, use fewer, e.g. `make -j2 mega65-r3 mega65-r6 VIVADO_THREADS=5`.
 * `make cor` makes the core files for MEGAFLASH (`build/<board>/<board>.cor`)
   with coretool, and `make fpga BOARD=<board>` programs the FPGA with m65.
-* `make sim` runs all the testbenches in parallel (the logs are in
-  `build/<name>.log`), `make run TB=<name>` one of them, and
+* `make sim` runs all the testbenches in parallel (about 10 minutes; the
+  logs are in `build/<name>.log`), `make run TB=<name>` one of them, and
   `make check TB=<name>` one of them with the waveform in GTKWave. The data
   of the testbenches is generated from the model first (`make tbdata`).
-* `make formal` runs the formal verification.
+* `make formal` runs the formal verification (about 20 seconds).
 * `make model` checks the model against the counts of the C++ program.
 * `make pictures` simulates the whole design and saves the pictures of the
   screen (`doc/*.png`).
@@ -211,7 +222,7 @@ installs the free tools (as the CI does,
 
 The Nexys 4 DDR has a smaller FPGA (XC7A100T, speed grade -1), so it has
 fewer engines (4 for 8x8, 2 for 6x10 and 3x20, 1 for the others), and the
-MAIN clock is 180 MHz. The picture is also 1280x1024 @ 60 Hz on its VGA
+MAIN clock is 154.3 MHz. The picture is also 1280x1024 @ 60 Hz on its VGA
 output (4 bits per colour). The buttons are listed under
 [Controls](#controls); the switches SW3 to SW0 select the puzzle as a binary
 number (0 is puzzle 1, 10 to 15 are puzzle 9).

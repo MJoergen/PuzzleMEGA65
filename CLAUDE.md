@@ -9,7 +9,8 @@ MEGA65 (R3 and R6, XC7A200T, 1280x1024 on VGA and HDMI) and the Nexys 4 DDR
 
 ## Commands
 * `make sim`: all testbenches in parallel (logs in `build/<tb>.log`), about
-  15 minutes, mostly `engine` (5x8) and `core`. `make run TB=<name>` runs
+  10 minutes, mostly `core`. `make run TB=engine GENERICS=G_COUNTED=true`
+  also runs the whole 5x8 search (18 minutes). `make run TB=<name>` runs
   one. They must all pass after a VHDL change. Needs `make tbdata` (done
   automatically): the model data in `build/model/` (not committed).
 * `make formal`: the proofs in `formal/` (control, cdc_data, bcd,
@@ -19,13 +20,18 @@ MEGA65 (R3 and R6, XC7A200T, 1280x1024 on VGA and HDMI) and the Nexys 4 DDR
 * `make puzzles` regenerates `src/main/puzzle_pkg.vhd` (from `puzzles/*.txt`
   and `tools/puzzles.py`), `make palette` regenerates
   `src/vga/palette_pkg.vhd`. Commit the generated files.
-* `make mega65-r6`, `make mega65-r3`, `make nexys4ddr`: Vivado builds (each
-  about 12 to 15 minutes with 5 threads), results in `build/<board>/`
-  (`timing.rpt`, `utilization.rpt`). A build that fails timing writes no
-  bit-file. Run them in the background; at most 10 cores in total
-  (`make -j2 mega65-r3 mega65-r6`). Check for runaway Vivado processes with
-  `ps -eo pid,etime,args | grep [v]ivado` and kill by PID (never `pkill -f`
-  with a pattern that matches your own shell).
+* `make mega65-r6`, `make mega65-r3`, `make nexys4ddr`: Vivado builds
+  (MEGA65 about 14 minutes with the default 8 threads, Nexys 4 DDR about 7),
+  results in `build/<board>/` (`vivado.log`, `timing.rpt`,
+  `utilization.rpt`). A build that fails timing writes no bit-file. Run
+  them in the background; at most 10 cores in total, so two at a time with
+  `VIVADO_THREADS=5` (`make -j2 mega65-r3 mega65-r6 VIVADO_THREADS=5`).
+  The timing margin is small (about 0.05 ns at 196.4 MHz): after a change
+  in the MAIN clock domain, build and check `timing.rpt`. Check for runaway
+  Vivado processes with `ps -eo pid,etime,args | grep [v]ivado` and kill by
+  PID (never `pkill -f` with a pattern that matches your own shell). Vivado
+  2025.1 crashed once (segmentation fault during routing): just run it
+  again.
 * `make pictures`: core_tb with G_PICTURES writes the screen to
   `build/core/*.ppm`, converted to `doc/*.png` (slow, run in background).
 * VSG: `vsg -c vsg.yml -ap -f $(git ls-files '*.vhd' ':!src/vga/font_pkg.vhd' ':!src/main/puzzle_pkg.vhd' ':!src/hdmi' ':!src/keyboard' ':!src/max10')`
@@ -49,6 +55,10 @@ MEGA65 (R3 and R6, XC7A200T, 1280x1024 on VGA and HDMI) and the Nexys 4 DDR
 
 ## Conventions
 * VHDL follows [CODING_STYLE.md](CODING_STYLE.md) (as MandelbrotMEGA65).
+* Vectors indexed by a context or an engine are `to` vectors (e.g. busy
+  and done flags): assigning a `downto` vector to a `to` slice reverses it
+  silently (this froze the picture during a search once).
+* Test the display while a search runs (mode A), not only when paused.
 * GHDL uses the mcode backend; external names in testbenches must be
   declared in a process after the instance. GHDL can not analyze
   `clk_rst.vhd` and the top levels (unisim).

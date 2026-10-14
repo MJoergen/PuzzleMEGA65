@@ -12,10 +12,11 @@ CORETOOL = coretool
 # Name of the design. Used for the Vivado script.
 NAME = puzzle
 
-# The number of threads of each Vivado run. At most half of the cores of the
-# build machine should be used, also when the boards are built at the same
-# time (e.g. "make -j2 mega65-r3 mega65-r6" uses 2 * VIVADO_THREADS).
-VIVADO_THREADS = 5
+# The number of threads of each Vivado run (8 is the most that Vivado uses).
+# At most half of the cores of the build machine should be used, so when the
+# boards are built at the same time, use fewer, e.g.
+# "make -j2 mega65-r3 mega65-r6 VIVADO_THREADS=5".
+VIVADO_THREADS = 8
 
 # Target boards. Each board has its own FPGA part, top level module, source
 # files, and constraint file (<board>.xdc). The make target <board> generates

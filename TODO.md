@@ -19,16 +19,25 @@ Ideas for future work, roughly in order of expected benefit.
   puzzle, so all the engines of the FPGA would work on the selected puzzle.
   It would be larger and slower per engine, so this is only a win if the
   number of engines grows more than their speed drops.
-* **A faster 16x16 engine.** The 129-bit window of 16x16 limits its engine
-  to about 232 MHz out of context (the count of trailing ones). A
-  two-level count, or a ninth stage, would help.
-* **A faster MAIN clock.** The MEGA65 runs at 205.7 MHz; 216 MHz failed by
-  0.09 ns, in a few places: the 16x16 engine (stage 0: the level to the
-  read address of the stack), and the loop from `halt_o` of `control.vhd`
-  through the commits of all the engines (`sol_any_i`) back to its mode,
-  and from the mode (`run_o`) to the busy flags of the engines. The
-  solution flag for the halt could be taken before the halt (it is only
-  used when not halted), and `run_o` could be registered.
+* **A faster 16x16 engine.** The 129-bit window of 16x16 makes its engine
+  the slowest: stage 4 (the lowest group of 8 bits that is not full, and
+  the shift by whole groups) and stage 0 (the level to the read address of
+  the stack). It limits the Nexys 4 DDR to 154 MHz, where the path is
+  mostly routing (the one-hot select of the group fans out to all 129
+  bits). Stage 4 could only find the group and the trailing ones of every
+  group (registered, so the select can be replicated), and stage 5 do both
+  shifts. A ninth stage, or a slower clock for this one engine, would also
+  help.
+* **A faster MAIN clock.** The MEGA65 runs at 196.4 MHz. 205.7 MHz met
+  timing only just (and only with phys_opt_design after routing, which
+  makes the build longer than 15 minutes), with the near-critical paths
+  spread over all the engines (the done and busy flags, the write addresses
+  of the distributed RAMs of the stacks). Fewer, larger LUTRAMs per stack,
+  or more registers between the solver and the engines, might help. The
+  loop from `halt_o` of `control.vhd` through the commits of all the
+  engines (`sol_any_i`) back to its mode is also long: the solution flag
+  for the halt could be taken before the halt (it is only used when not
+  halted).
 * **A faster clock for the 8x8 engines.** Out of context the 8x8 engine
   meets 250 MHz; the MAIN clock is set by the slowest engine and the
   surrounding logic. A separate clock domain per puzzle is possible, but

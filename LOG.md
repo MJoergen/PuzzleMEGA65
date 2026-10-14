@@ -432,15 +432,16 @@ of 8 bits instead of one long carry chain.
 * The CI (`.github/workflows/ci.yml`, `scripts/install-tools.sh`), README,
   CLAUDE.md, TODO.md, and LICENSE.
 * Expected time of the whole search on the MEGA65 (the passes of the
-  slowest context from the model, times 8 clock cycles, at 205.7 MHz):
+  slowest context from the model, times 8 clock cycles, at 196.4 MHz, see
+  section 9):
 
   | Puzzle | Engines | Slowest context (passes) | Efficiency | Time      | C++     |
   | ------ | ------: | -----------------------: | ---------: | --------: | ------: |
-  | 8x8    |      16 |                6,982,269 |     95.5 % |   0.272 s |  42.6 s |
-  | 6x10   |       8 |                5,820,099 |     93.8 % |   0.226 s |  14.7 s |
-  | 3x20   |       8 |               24,168,913 |     98.8 % |   0.940 s |  57.4 s |
-  | 5x8    |       4 |                  565,098 |     87.3 % |   22.0 ms |   3.9 s |
-  | 7x7    |       2 |                   74,447 |     91.8 % |    2.9 ms |  0.05 s |
+  | 8x8    |      16 |                6,982,269 |     95.5 % |   0.285 s |  42.6 s |
+  | 6x10   |       8 |                5,820,099 |     93.8 % |   0.237 s |  14.7 s |
+  | 3x20   |       8 |               24,168,913 |     98.8 % |   0.985 s |  57.4 s |
+  | 5x8    |       4 |                  565,098 |     87.3 % |   23.0 ms |   3.9 s |
+  | 7x7    |       2 |                   74,447 |     91.8 % |    3.0 ms |  0.05 s |
 * R3 and R6 with that: R3 -0.007 ns (from `finished_r` of control.vhd,
   through `run_o`, to the busy flags of an engine), R6 -0.37 ns, in the new
   stage 4 (the anchor plus 8 times the encoded group, an adder after the
@@ -449,3 +450,71 @@ of 8 bits instead of one long carry chain.
   `keep`, like the reset), so a pass starts one clock cycle after the mode
   allows it (halt_i still acts at once, so N still stops at the solution).
   engine_tb and core_tb pass.
+* R6 and R3 at 205.7 MHz met timing (+0.002 and +0.027 ns), but only with
+  the phys_opt after routing, so the clock went down one more step, to
+  1080/5.5 = 196.4 MHz (the Nexys 4 DDR: 180 MHz failed by 0.11 ns in the
+  16x16 engine, so 1080/6.5 = 166 MHz). Then all three met timing right
+  after routing (R6 +0.072 ns, R3 +0.057 ns, Nexys +0.021 ns).
+* The halt loop (control.vhd, halt_r, through the commits of all the
+  engines, back to halt_r) was the worst path of R3: the engines now give
+  the solution flag before the halt (`sol_any_o`) for it. The control only
+  acts on it in the mode N, where the halt is never set already.
+* Build time: R3 alone with 5 threads took 15.7 minutes. With 8 threads
+  (the most Vivado uses; one build alone stays within half of the cores)
+  and without the power report: 13.6 minutes. VIVADO_THREADS is now 8, and
+  5 for two builds at the same time.
+
+## 11. The pictures, and a bug they found
+
+* `make pictures` (core_tb with G_PICTURES, 40 minutes) wrote all the
+  pictures, but the 16x16 one still showed the 6x10 solution, and the 5x5
+  one 373 positions instead of 372 (after a switch from the running 16x16
+  search).
+* The first: the snapshot never finished while a search ran in the mode A.
+  The engine's busy and done flags were `downto` vectors, and the solver
+  put them into `to` slices, so the flags of the contexts were reversed
+  within each engine: the snapshot waited for 16 idle clock cycles of
+  context 7 instead of the held context 0, which never came while the
+  search ran. The picture (and the statistics, which are sent with it)
+  froze in the modes A and N until the end of the search. This was in the
+  design from the start: all the tests of the picture and of the
+  statistics so far were made while paused or halted. Also the shown
+  context moved on when the wrong context was done. Now both are `to`
+  vectors, indexed by the context.
+* The second: the engines of the old puzzle still commit passes for a few
+  clock cycles after a puzzle is selected (until their reset arrives,
+  which now takes 3 clock cycles), and the counts take 2 more through the
+  solver, but the restart (which also clears the statistics) was only 2
+  clock cycles long. It is now 8 (C_RESTART in control.vhd, the formal
+  proof updated).
+* core_tb now also checks both: 16x16 in the mode A, and after two frames
+  the statistics in the VGA clock domain must be those of the running
+  search; then 5x5 selected while 16x16 runs, and all: exactly the counts
+  of the model. core_tb has a 16x16 engine for this, and takes 10 minutes.
+* R6 at 196.4 MHz then needed the phys_opt after routing again (-0.11 ns
+  after routing), now almost only in the 16x16 engine (stage 4: the test
+  of the full groups, the carry chain over 17 groups, and the 17-way
+  multiplexer). With groups of 16 bits for a window of more than 64 bits
+  (only 16x16: 9 groups; stage 5 shifts by 0 to 15), R6 met timing right
+  after routing, +0.119 ns. The Nexys 4 DDR then failed at 166 MHz
+  (-0.20 ns, 82 % routing: the select of the group fans out to all 129
+  bits), so it runs at 1080/7 = 154.3 MHz (see TODO.md for a better split
+  of the stages 4 and 5).
+* Vivado crashed once more on R6 at the start of routing (segmentation
+  fault, a core dump); the same run again passed.
+
+## 12. Final results
+
+| Board       | MAIN clock | WNS       | LUTs            | Registers       | Build time |
+| ----------- | ---------: | --------: | --------------: | --------------: | ---------: |
+| MEGA65 R6   | 196.4 MHz  | +0.119 ns | 64,473 (48.2 %) | 84,499 (31.6 %) | 13.3 min   |
+| MEGA65 R3   | 196.4 MHz  | +0.073 ns | 64,600 (48.3 %) | 84,641 (31.6 %) | 14.8 min   |
+| Nexys 4 DDR | 154.3 MHz  | +0.129 ns | 22,989 (36.3 %) | 28,730 (22.7 %) | 6.3 min    |
+
+One build at a time, 8 threads, Vivado 2025.1. The MEGA65 builds are just
+under 15 minutes (synthesis 5, placement 4, routing 3 minutes, the rest
+reports and the bit-file); with the phys_opt after routing they would be
+16 minutes. `make formal`: 20 seconds, all proven. `make sim`: all 8
+testbenches pass in 9.9 minutes (core_tb 9.9, board_tb 3, engine_tb 1.7).
+The full engine_tb with 5x8: passes (18 minutes). `make pictures`: 45
+minutes; the pictures in doc/ are from this version.

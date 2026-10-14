@@ -90,7 +90,10 @@
 --
 -- The last stage shows every clock cycle which context is in it (ctx_o), and
 -- whether its pass is committed (commit_o), and if so whether its node is
--- counted (count_o), a solution (sol_o), or owned (claim_o). These outputs
+-- counted (count_o), a solution (sol_o), or owned (claim_o). sol_any_o is
+-- the solution before the halt (not committed if halt_i is high), for the
+-- halt itself: it does not depend on halt_i, which would make a long loop
+-- through control.vhd (the halt only matters when it is low). These outputs
 -- are combinational (registers and halt_i), so that the solver can stop all
 -- engines in the next clock cycle. The visited node (its level, and the
 -- anchor and the slot of its last piece) and whether it is skipped are also
@@ -136,15 +139,16 @@ entity engine is
       commit_o      : out std_logic;                      -- The pass is committed
       count_o       : out std_logic;                      -- ... and its node is counted
       sol_o         : out std_logic;                      -- ... and it is a solution
+      sol_any_o     : out std_logic;                      -- A solution, also if halted
       claim_o       : out std_logic;                      -- ... and it is owned
       lvl_o         : out std_logic_vector(4 downto 0);   -- The visited node
       anchor_o      : out std_logic_vector(8 downto 0);
       slot_o        : out std_logic_vector(7 downto 0);
       skip_o        : out std_logic;
 
-      busy_o        : out std_logic_vector(C_STAGES-1 downto 0);
-      ctx_done_o    : out std_logic_vector(C_STAGES-1 downto 0);
-      done_o        : out std_logic;           -- All the contexts are done
+      busy_o        : out std_logic_vector(0 to C_STAGES-1);  -- Indexed by context
+      ctx_done_o    : out std_logic_vector(0 to C_STAGES-1);
+      done_o        : out std_logic;                          -- All the contexts are done
 
       -- Read port of the paths (registered)
       path_ctx_i    : in  std_logic_vector(log2(C_STAGES)-1 downto 0);
@@ -162,6 +166,9 @@ architecture rtl of engine is
    constant C_K         : positive := C_P.slots;
    constant C_W         : positive := C_P.width;
    constant C_B         : positive := C_P.squares;
+   -- The size of the groups of the shift of the window (see stage 4): 16 for a
+   -- wide window (16x16), which has fewer groups then, 8 otherwise
+   constant C_GS        : positive := 8 * (1 + boolean'pos(C_W > 64));
    constant C_D         : positive := C_P.depth;
 
    constant C_CTX_BITS  : natural  := log2(C_STAGES);
@@ -267,20 +274,20 @@ architecture rtl of engine is
       j         : natural range 0 to C_P.frontier;    -- Nodes at depth C_D so far
       done      : std_logic;
       -- The pass
-      onehot    : std_logic_vector(C_K-1 downto 0);   -- The slot of the child
-      f_rem     : std_logic_vector(C_K-1 downto 0);   -- The children left
+      onehot    : std_logic_vector(C_K-1 downto 0);      -- The slot of the child
+      f_rem     : std_logic_vector(C_K-1 downto 0);      -- The children left
       rem_any   : std_logic;
       slot      : std_logic_vector(7 downto 0);
-      c         : std_logic_vector(C_W-1 downto 0);   -- The window of the child
+      c         : std_logic_vector(C_W-1 downto 0);      -- The window of the child
       used_c    : std_logic_vector(C_N-1 downto 0);
-      grp       : natural range 0 to C_W / 8;         -- Stage 4 moved the window by 8 * grp
+      grp       : natural range 0 to C_W / C_GS;         -- Stage 4 moved the window by C_GS * grp
       base_c    : natural range 0 to C_B;
-      f_child   : std_logic_vector(C_K-1 downto 0);   -- The children of the child
+      f_child   : std_logic_vector(C_K-1 downto 0);      -- The children of the child
       child_any : std_logic;
-      top       : std_logic;                          -- The child is above depth C_D
-      frontier  : std_logic;                          -- The child is at depth C_D
-      last      : std_logic;                          -- The child has all the pieces
-      hit       : std_logic;                          -- The target is the next node at C_D
+      top       : std_logic;                             -- The child is above depth C_D
+      frontier  : std_logic;                             -- The child is at depth C_D
+      last      : std_logic;                             -- The child has all the pieces
+      hit       : std_logic;                             -- The target is the next node at C_D
       owned     : std_logic;
       skip      : std_logic;
       counted   : std_logic;
@@ -439,19 +446,19 @@ architecture rtl of engine is
    -- of its lowest zero, where zeros are appended beyond the window: all the
    -- squares beyond the window are empty), in two steps, so that the long
    -- window of 16x16 (129 bits) is fast enough:
-   -- * Stage 4: by whole groups of 8 bits, to the lowest group that is not
+   -- * Stage 4: by whole groups of C_GS bits, to the lowest group that is not
    --   full (a short carry chain over the groups, and a one-hot
    --   multiplexer), grp groups.
-   -- * Stage 5: by the trailing ones of the lowest group (0 to 7), and the
-   --   anchor moves by both.
+   -- * Stage 5: by the trailing ones of the lowest group (0 to C_GS-1), and
+   --   the anchor moves by both.
    -- Stage 4 also finds whether the child is the target of the context, if it
    -- is at depth C_D (the target does not change during a pass: a new target
    -- is granted while the context is in stage 2 or 3).
-   constant C_NG : positive := C_W / 8 + 1;    -- Groups, with the appended zeros
+   constant C_NG : positive := C_W / C_GS + 1;  -- Groups, with the appended zeros
 
    function stage4 (s : stage_t; tgt : natural) return stage_t is
       variable s_v   : stage_t;
-      variable v_v   : std_logic_vector(8*C_NG+C_W-1 downto 0);  -- With zeros
+      variable v_v   : std_logic_vector(C_GS*C_NG+C_W-1 downto 0);  -- With zeros
       variable nf_v  : std_logic_vector(C_NG-1 downto 0);
       variable sel_v : std_logic_vector(C_NG-1 downto 0);
       variable c_v   : std_logic_vector(C_W-1 downto 0);
@@ -460,13 +467,13 @@ architecture rtl of engine is
       v_v                 := (others => '0');
       v_v(C_W-1 downto 0) := s.c;
       for g in 0 to C_NG-1 loop
-         nf_v(g) := not (and v_v(8*g+7 downto 8*g));
+         nf_v(g) := not (and v_v(C_GS*g+C_GS-1 downto C_GS*g));
       end loop;
       sel_v := lowest_one(nf_v);
       c_v   := (others => '0');
       for g in 0 to C_NG-1 loop
          if sel_v(g) = '1' then
-            c_v := c_v or v_v(C_W-1 + 8*g downto 8*g);
+            c_v := c_v or v_v(C_W-1 + C_GS*g downto C_GS*g);
          end if;
       end loop;
       s_v.c   := c_v;
@@ -478,15 +485,15 @@ architecture rtl of engine is
    -- Stage 5: see stage 4
    function stage5 (s : stage_t) return stage_t is
       variable s_v : stage_t;
-      variable g_v : std_logic_vector(7 downto 0);
-      variable t_v : natural range 0 to 7;
+      variable g_v : std_logic_vector(C_GS-1 downto 0);
+      variable t_v : natural range 0 to C_GS-1;
    begin
-      s_v                             := s;
-      g_v                             := (others => '0');
-      g_v(minimum(C_W, 8)-1 downto 0) := s.c(minimum(C_W, 8)-1 downto 0);
-      t_v                             := trailing_ones(g_v) mod 8;  -- Not full
-      s_v.c      := s.c srl t_v;
-      s_v.base_c := s.base + 8 * s.grp + t_v;
+      s_v                                := s;
+      g_v                                := (others => '0');
+      g_v(minimum(C_W, C_GS)-1 downto 0) := s.c(minimum(C_W, C_GS)-1 downto 0);
+      t_v                                := trailing_ones(g_v) mod C_GS;  -- Not full
+      s_v.c                              := s.c srl t_v;
+      s_v.base_c                         := s.base + C_GS * s.grp + t_v;
       return s_v;
    end function stage5;
 
@@ -594,8 +601,8 @@ architecture rtl of engine is
    type tgt_vector is array (0 to C_STAGES-1) of natural;
    signal tgt_r       : tgt_vector;
    signal credit_r    : std_logic_vector(C_STAGES-1 downto 0);
-   signal cdone_r     : std_logic_vector(C_STAGES-1 downto 0);
-   signal busy_r      : std_logic_vector(C_STAGES-1 downto 0);
+   signal cdone_r     : std_logic_vector(0 to C_STAGES-1);
+   signal busy_r      : std_logic_vector(0 to C_STAGES-1);
 
    -- The reset, registered in each engine. The engines of a puzzle have the
    -- same reset, so without keep, synthesis merges their registers into one,
@@ -667,7 +674,7 @@ begin
       variable ring_v  : stage_vector(0 to C_STAGES-1);
       variable s7_v    : stage_t;
       variable may_v   : std_logic;
-      variable busy_v  : std_logic_vector(C_STAGES-1 downto 0);
+      variable busy_v  : std_logic_vector(0 to C_STAGES-1);
       variable idle_v  : boolean := false;
       variable first_v : boolean := false;     -- The first clock cycle of the reset
    begin
@@ -825,6 +832,7 @@ begin
    commit_o   <= commit_s;
    count_o    <= commit_s and r7_counted;
    sol_o      <= commit_s and r7_sol;
+   sol_any_o  <= r7_valid and r7_sol;
    claim_o    <= commit_s and r7_owned;
    lvl_o      <= to_slv(r7_lvl + 1, 5);
    anchor_o   <= to_slv(r7_base, 9);

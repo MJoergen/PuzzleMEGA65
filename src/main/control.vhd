@@ -18,7 +18,10 @@
 -- the beginning (the counters start again), and then do what they do. The
 -- keys 1 to 9 (C_CMD_PUZZLE) select a puzzle, start its search again, and
 -- pause it. A search is started again by a reset of the solver (restart_o,
--- for two clock cycles), and the outputs of the solver are only used again
+-- for C_RESTART clock cycles, which also resets the statistics: the engines
+-- of the old puzzle still commit a few passes, until their reset arrives,
+-- and the counts take a few more clock cycles through the solver, which
+-- must not be counted), and the outputs of the solver are only used again
 -- C_SETTLE clock cycles later, when they have been updated by every context
 -- (the done flags of the contexts are updated once in eight clock cycles).
 --
@@ -68,6 +71,7 @@ end entity control;
 
 architecture rtl of control is
 
+   constant C_RESTART : natural := 8;
    constant C_SETTLE  : natural := 32;
 
    type mode_t is (PAUSE_ST, ALL_ST, NEXT_ST, SLOW_ST);
@@ -84,7 +88,7 @@ architecture rtl of control is
 
    -- The restart: the reset of the solver, and the time until its outputs are
    -- valid. A step that is asked for during a restart is done after it.
-   signal restart_r   : std_logic_vector(1 downto 0) := "11";
+   signal restart_r   : std_logic_vector(C_RESTART-1 downto 0) := (others => '1');
    signal settle_r    : natural range 0 to C_SETTLE := C_SETTLE;
    signal step_r      : std_logic := '0';
 
@@ -102,7 +106,7 @@ begin
    p_control : process (clk_i)
       procedure restart is
       begin
-         restart_r  <= "11";
+         restart_r  <= (others => '1');
          settle_r   <= C_SETTLE;
          finished_r <= '0';
          solution_r <= '0';
@@ -112,7 +116,7 @@ begin
    begin
       if rising_edge(clk_i) then
          credit_r    <= '0';
-         restart_r   <= restart_r(0) & '0';
+         restart_r   <= restart_r(C_RESTART-2 downto 0) & '0';
          disp_done_r <= ctx_done_i(disp_r);
          disp_new_r  <= '0';
          if settle_r /= 0 then
@@ -237,7 +241,7 @@ begin
    end process p_status;
 
    puzzle_o     <= puzzle_r;
-   restart_o    <= restart_r(1);
+   restart_o    <= restart_r(C_RESTART-1);
    run_o        <= '1' when (mode_r = ALL_ST or mode_r = NEXT_ST) and finished_r = '0' and
                             settle_r = 0 else
  '0';

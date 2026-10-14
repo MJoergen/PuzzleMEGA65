@@ -7,7 +7,8 @@
 # constraint file (<board>.xdc) is next to this script.
 #
 # The reports of the routed design (timing.rpt, utilization.rpt, and
-# power.rpt) are written to build/<board> too. The bit-file is only written
+# utilization_hier.rpt) are written to build/<board> too (no power report,
+# to keep the build short). The bit-file is only written
 # when the design meets timing (setup and hold). Otherwise any old bit-file
 # is deleted, and the script stops with an error, so "make fpga" can not
 # load a design that fails timing. The routed checkpoint is still written,
@@ -40,7 +41,6 @@ write_checkpoint -force $board.dcp
 report_timing_summary -file timing.rpt
 report_utilization -file utilization.rpt
 report_utilization -hierarchical -hierarchical_depth 6 -file utilization_hier.rpt
-report_power -file power.rpt
 set wns [get_property SLACK [get_timing_paths -delay_type max]]
 set whs [get_property SLACK [get_timing_paths -delay_type min]]
 puts "INFO: Setup slack (WNS) $wns ns, hold slack (WHS) $whs ns."

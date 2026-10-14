@@ -102,8 +102,10 @@ vunit i_control(control(rtl))
    -- ASSERTIONS ABOUT INTERNAL STATE
    -----------------------------
 
-   -- The restart is two clock cycles long, and the solver settles after it
-   f_settle : assert always {restart_r /= "00"} |-> {settle_r >= C_SETTLE - 2};
+   -- The restart is C_RESTART clock cycles long, and the solver settles after
+   -- it
+   f_settle : assert always {restart_r /= (restart_r'range => '0')} |->
+      {settle_r >= C_SETTLE - C_RESTART};
 
 
    -----------------------------

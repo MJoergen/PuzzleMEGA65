@@ -56,8 +56,9 @@ architecture structural of nexys4ddr is
    constant C_VGA_FREQ    : natural  := 108_000_000;
 
    -- The divider of the MAIN clock (see clk_rst.vhd), and its frequency in Hz:
-   -- 1080 MHz / 6.0 = 180 MHz, for the speed grade -1.
-   constant C_MAIN_DIVIDE : real     := 6.0;
+   -- 1080 MHz / 7.0 = 154.29 MHz, for the speed grade -1 (180 MHz and
+   -- 166 MHz failed by 0.1 to 0.2 ns, in the 16x16 engine, mostly routing).
+   constant C_MAIN_DIVIDE : real     := 7.0;
    constant C_MAIN_FREQ   : natural  :=
       natural(100.0E6 / real(C_VCO_DIVIDE) * C_VCO_MULT / C_MAIN_DIVIDE);
 

@@ -62,6 +62,7 @@ here, roughly in order of importance.
     puzzle file, so a new puzzle needs a new build (`make puzzles`).
 15. The 16x16 puzzle is far too large to be searched to the end in a
     reasonable time, but its first solutions are found (and shown) quickly.
+    So it has only one engine (its engine is the largest and slowest).
 
 ## The boards
 
@@ -79,17 +80,24 @@ here, roughly in order of importance.
 19. The reset button of the MEGA65 (and CPU_RESET of the Nexys 4 DDR) resets
     the whole design: puzzle 1, paused.
 
+20. **Speed against build time.** The MAIN clock of the MEGA65 is
+    196.4 MHz. 205.7 MHz met timing too, but only just, and only with an
+    extra optimization after routing, which made the build take 16 to 17
+    minutes. I took the 15-minute limit for a build as the harder
+    requirement, and gave up 4.5 % of the speed. (The Nexys 4 DDR, the
+    nice-to-have board, runs at 154.3 MHz.)
+
 ## The repository
 
-20. The repository is created with `git init` in the folder, with the
+21. The repository is created with `git init` in the folder, with the
     history of the work as commits on `main`. I did not create the GitHub
     repository or push (an outward-facing action, left to you); you have
     since pushed it to GitHub (MJoergen/PuzzleMEGA65), where the CI
     workflow (`.github/workflows/ci.yml`) runs on every push.
-21. The structure, the Makefile, the coding style (`CODING_STYLE.md`,
+22. The structure, the Makefile, the coding style (`CODING_STYLE.md`,
     `vsg.yml`), and the tools follow MandelbrotMEGA65. The files from the
     C64MEGA65 core (`src/hdmi`, `src/keyboard`, `src/max10`) and
     `src/clk_rst.vhd` and `src/cdc_data.vhd` are copied from
     MandelbrotMEGA65 (the last two slightly changed).
-22. The license is MIT, as for the C++ program and MandelbrotMEGA65 (the
+23. The license is MIT, as for the C++ program and MandelbrotMEGA65 (the
     copied files keep their own licenses).

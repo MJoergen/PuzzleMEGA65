@@ -148,6 +148,7 @@ begin
             commit_o      => commit,
             count_o       => count,
             sol_o         => sol,
+            sol_any_o     => open,
             claim_o       => claim,
             lvl_o         => lvl,
             anchor_o      => anchor,

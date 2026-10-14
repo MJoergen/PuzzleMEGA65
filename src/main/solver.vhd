@@ -13,7 +13,7 @@
 -- of solutions (sol_o), and the context of the solution of the lowest engine
 -- that has one (sol_ctx_o), two clock cycles later (registered twice: the
 -- bits of the engines, and the sums). Only sol_any_o, whether any engine
--- commits a solution, is combinational (from the last stage of the engines,
+-- has a solution in its last stage (before the halt), is combinational (from the last stage of the engines,
 -- an OR of all the engines of all the puzzles, without a multiplexer), so
 -- that the halt can be registered in the same clock cycle (control.vhd). The
 -- engines of the puzzles that are not selected are in reset, so their
@@ -90,29 +90,32 @@ architecture structural of solver is
 
    -- The outputs of the engines of each puzzle
    type eng_t is record
-      ctx    : ctx_vector;
-      count  : std_logic_vector(0 to C_E-1);
-      sol    : std_logic_vector(0 to C_E-1);
-      claim  : std_logic_vector(0 to C_E-1);
-      busy   : std_logic_vector(0 to C_NUM_CTX-1);
-      cdone  : std_logic_vector(0 to C_NUM_CTX-1);
-      anchor : slv9_vector(0 to C_E-1);
-      slot   : slv8_vector(0 to C_E-1);
-      vis    : slv5_vector(0 to C_E-1);
+      ctx     : ctx_vector;
+      count   : std_logic_vector(0 to C_E-1);
+      sol     : std_logic_vector(0 to C_E-1);
+      sol_any : std_logic_vector(0 to C_E-1);
+      claim   : std_logic_vector(0 to C_E-1);
+      busy    : std_logic_vector(0 to C_NUM_CTX-1);
+      cdone   : std_logic_vector(0 to C_NUM_CTX-1);
+      anchor  : slv9_vector(0 to C_E-1);
+      slot    : slv8_vector(0 to C_E-1);
+      vis     : slv5_vector(0 to C_E-1);
    end record eng_t;
 
    type eng_vector is array (0 to C_NUM_PUZZLES-1) of eng_t;
 
    -- The outputs of an engine that the puzzle does not have
-   constant C_NO_ENG : eng_t := (ctx    => (others => (others => '0')),
-      count  => (others => '0'),
-      sol    => (others => '0'),
-      claim  => (others => '0'),
-      busy   => (others => '0'),
-      cdone  => (others => '1'),
-      anchor => (others => (others => '0')),
-      slot   => (others => (others => '0')),
-      vis    => (others => (others => '0')));
+   constant C_NO_ENG : eng_t := (
+      ctx     => (others => (others => '0')),
+      count   => (others => '0'),
+      sol     => (others => '0'),
+      sol_any => (others => '0'),
+      claim   => (others => '0'),
+      busy    => (others => '0'),
+      cdone   => (others => '1'),
+      anchor  => (others => (others => '0')),
+      slot    => (others => (others => '0')),
+      vis     => (others => (others => '0')));
 
    signal eng          : eng_vector;
    signal sel_r        : eng_t;
@@ -188,6 +191,7 @@ begin
                commit_o      => open,
                count_o       => eng(p).count(e),
                sol_o         => eng(p).sol(e),
+               sol_any_o     => eng(p).sol_any(e),
                claim_o       => eng(p).claim(e),
                lvl_o         => open,
                anchor_o      => open,
@@ -210,6 +214,7 @@ begin
          eng(p).ctx(G_ENGINES(p) to C_E-1)                  <= C_NO_ENG.ctx(G_ENGINES(p) to C_E-1);
          eng(p).count(G_ENGINES(p) to C_E-1)                <= C_NO_ENG.count(G_ENGINES(p) to C_E-1);
          eng(p).sol(G_ENGINES(p) to C_E-1)                  <= C_NO_ENG.sol(G_ENGINES(p) to C_E-1);
+         eng(p).sol_any(G_ENGINES(p) to C_E-1)              <= C_NO_ENG.sol_any(G_ENGINES(p) to C_E-1);
          eng(p).claim(G_ENGINES(p) to C_E-1)                <= C_NO_ENG.claim(G_ENGINES(p) to C_E-1);
          eng(p).busy(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1)  <= C_NO_ENG.busy(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1);
          eng(p).cdone(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1) <= C_NO_ENG.cdone(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1);
@@ -233,13 +238,14 @@ begin
    -- The results of the selected puzzle
    --------------------------------------------------
 
-   -- Any solution of any engine, for the halt
+   -- Any solution of any engine, for the halt (before the halt, see
+   -- engine.vhd)
    p_sol_any : process (all)
       variable any_v : std_logic;
    begin
       any_v := '0';
       for p in 0 to C_NUM_PUZZLES-1 loop
-         any_v := any_v or (or eng(p).sol);
+         any_v := any_v or (or eng(p).sol_any);
       end loop;
       sol_any_o <= any_v;
    end process p_sol_any;
