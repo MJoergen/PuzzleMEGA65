@@ -29,10 +29,13 @@
 // Usage: model <slots file> <command> [args]
 //   run <engines> <depth>      Counts of every context: passes, nodes,
 //                              solutions, and the totals
-//   trace <engines> <depth> <prefix>
+//   trace <engines> <depth> <prefix> [<passes>]
 //                              Writes every pass of every context g to
 //                              <prefix>_<g>.trace, one per line: level of the
-//                              child, anchor, slot, counted, skipped, solution
+//                              child, anchor, slot, counted, skipped, solution.
+//                              With <passes>, only the first passes of each
+//                              context, and the search stops when every
+//                              context has made them (for 16x16)
 //   firsts <engines> <depth>   For each context the number of passes until
 //                              (and including) its first solution, 0 if none
 //   seq                        One context (the C++ program): the counts
@@ -279,9 +282,15 @@ int main(int argc, char **argv)
       if (cmd == "run")
          printf("total nodes %ld solutions %ld max_passes %ld\n", nodes, sol, max_passes);
    }
-   else if (cmd == "trace" && argc == 6)
+   else if (cmd == "trace" && (argc == 6 || argc == 7))
    {
       int engines = atoi(argv[3]), depth = atoi(argv[4]);
+      long limit = argc == 7 ? atol(argv[6]) : -1;
+      std::vector<long> written(8 * engines, 0);
+      int full = 0;  // Contexts that have written limit passes
+      struct Stop
+      {
+      };
       std::vector<FILE *> f;
       for (int g = 0; g < 8 * engines; ++g)
       {
@@ -293,10 +302,20 @@ int main(int argc, char **argv)
             return 1;
          }
       }
-      search(engines, depth, [&](const Context &x, const Pass &p) {
-         fprintf(f[x.gid], "%d %d %d %d %d %d\n", p.level, p.anchor, p.slot, p.counted,
-                 p.skipped, p.solution);
-      });
+      try
+      {
+         search(engines, depth, [&](const Context &x, const Pass &p) {
+            if (limit >= 0 && written[x.gid] >= limit)
+               return;
+            fprintf(f[x.gid], "%d %d %d %d %d %d\n", p.level, p.anchor, p.slot, p.counted,
+                    p.skipped, p.solution);
+            if (++written[x.gid] == limit && ++full == 8 * engines)
+               throw Stop();
+         });
+      }
+      catch (const Stop &)
+      {
+      }
       for (FILE *fp : f)
          fclose(fp);
    }

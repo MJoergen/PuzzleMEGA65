@@ -25,7 +25,7 @@ architecture simulation of bcd_tb is
    signal bcd     : std_logic_vector(4*C_DIGITS-1 downto 0);
    signal done    : std_logic;
 
-   function reference (v : unsigned) return std_logic_vector is
+   function to_bcd (v : unsigned) return std_logic_vector is
       variable v_v : unsigned(v'length-1 downto 0);
       variable r_v : std_logic_vector(4*C_DIGITS-1 downto 0);
    begin
@@ -35,7 +35,7 @@ architecture simulation of bcd_tb is
          v_v                   := v_v / 10;
       end loop;
       return r_v;
-   end function reference;
+   end function to_bcd;
 
 begin
 
@@ -79,9 +79,9 @@ begin
          assert cycles_v = C_BITS + 1
             report "done_o after " & integer'image(cycles_v - 1) & " clock cycles"
             severity failure;
-         assert bcd = reference(v)
+         assert bcd = to_bcd(v)
             report "The conversion of " & to_hstring(v) & " is " & to_hstring(bcd) &
-                   ", expected " & to_hstring(reference(v))
+                   ", expected " & to_hstring(to_bcd(v))
             severity failure;
          n_v := n_v + 1;
       end procedure convert;

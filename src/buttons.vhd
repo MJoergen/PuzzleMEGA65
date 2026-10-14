@@ -24,7 +24,7 @@ use work.ctrl_pkg.all;
 
 entity buttons is
    generic (
-      G_DEBOUNCE  : positive                          -- Clock cycles
+      G_DEBOUNCE : positive                          -- Clock cycles
    );
    port (
       clk_i       : in  std_logic;
@@ -91,23 +91,23 @@ begin
    begin
       if rising_edge(clk_i) then
          cmd_valid_r <= '0';
-         if stable_r(3) = '1' and stable_d(3) = '0' then          -- BTNL
+         if stable_r(3) = '1' and stable_d(3) = '0' then                                      -- BTNL
             cmd_valid_r <= '1';
             cmd_r       <= (C_CMD_SLOW, "0000");
          end if;
-         if stable_r(4) = '1' and stable_d(4) = '0' then          -- BTNC
+         if stable_r(4) = '1' and stable_d(4) = '0' then                                      -- BTNC
             cmd_valid_r <= '1';
             cmd_r       <= (C_CMD_PAUSE, "0000");
          end if;
-         if stable_r(0) = '1' and stable_d(0) = '0' then          -- BTND
+         if stable_r(0) = '1' and stable_d(0) = '0' then                                      -- BTND
             cmd_valid_r <= '1';
             cmd_r       <= (C_CMD_STEP, "0000");
          end if;
-         if stable_r(2) = '1' and stable_d(2) = '0' then          -- BTNR
+         if stable_r(2) = '1' and stable_d(2) = '0' then                                      -- BTNR
             cmd_valid_r <= '1';
             cmd_r       <= (C_CMD_NEXT, "0000");
          end if;
-         if stable_r(1) = '1' and stable_d(1) = '0' then          -- BTNU
+         if stable_r(1) = '1' and stable_d(1) = '0' then                                      -- BTNU
             cmd_valid_r <= '1';
             cmd_r       <= (C_CMD_ALL, "0000");
          end if;

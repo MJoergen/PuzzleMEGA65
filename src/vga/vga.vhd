@@ -27,8 +27,8 @@ use work.ctrl_pkg.all;
 
 entity vga is
    generic (
-      G_MODE    : video_mode_t;
-      G_HELP    : string                             -- The keys, see status.vhd
+      G_MODE : video_mode_t;
+      G_HELP : string                             -- The keys, see status.vhd
    );
    port (
       clk_i     : in  std_logic;                     -- The pixel clock

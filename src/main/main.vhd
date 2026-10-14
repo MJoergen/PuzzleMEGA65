@@ -204,13 +204,16 @@ begin
       end if;
    end process p_stats;
 
-   stats_o <= (positions => stats_r.positions,
-               solutions => stats_r.solutions,
-               rate      => stats_r.rate,
-               progress  => stats_r.progress,
-               time      => stats_r.time,
-               status    => stats_r.status,
-               puzzle    => stats_r.puzzle,
-               buf       => buf);
+   stats_o <=
+   (
+      positions => stats_r.positions,
+      solutions => stats_r.solutions,
+      rate      => stats_r.rate,
+      progress  => stats_r.progress,
+      time      => stats_r.time,
+      status    => stats_r.status,
+      puzzle    => stats_r.puzzle,
+      buf       => buf
+   );
 
 end architecture structural;

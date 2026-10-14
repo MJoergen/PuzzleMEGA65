@@ -78,7 +78,8 @@
 --
 -- Control
 -- -------
--- A context starts a pass when run_i is high (the modes "all" and "next"),
+-- A context starts a pass when run_i is high (the modes "all" and "next";
+-- it is registered here, so it acts one clock cycle later),
 -- or when it has a credit (credit_i, the modes "slow" and "one step"), and
 -- it is not done, not held (hold_i, while its path is read), and halt_i is
 -- low. The credit is used up by a pass that visits a node that is not
@@ -110,8 +111,8 @@ use work.puzzle_pkg.all;
 
 entity engine is
    generic (
-      G_PUZZLE  : natural;                     -- An index into C_PUZZLES
-      G_FIRST   : natural                      -- Number of the first context
+      G_PUZZLE : natural;                     -- An index into C_PUZZLES
+      G_FIRST  : natural                      -- Number of the first context
    );
    port (
       clk_i         : in  std_logic;
@@ -132,10 +133,10 @@ entity engine is
 
       -- The context in the last stage, and its pass (combinational)
       ctx_o         : out std_logic_vector(log2(C_STAGES)-1 downto 0);
-      commit_o      : out std_logic;           -- The pass is committed
-      count_o       : out std_logic;           -- ... and its node is counted
-      sol_o         : out std_logic;           -- ... and it is a solution
-      claim_o       : out std_logic;           -- ... and it is owned
+      commit_o      : out std_logic;                      -- The pass is committed
+      count_o       : out std_logic;                      -- ... and its node is counted
+      sol_o         : out std_logic;                      -- ... and it is a solution
+      claim_o       : out std_logic;                      -- ... and it is owned
       lvl_o         : out std_logic_vector(4 downto 0);   -- The visited node
       anchor_o      : out std_logic_vector(8 downto 0);
       slot_o        : out std_logic_vector(7 downto 0);
@@ -272,7 +273,7 @@ architecture rtl of engine is
       slot      : std_logic_vector(7 downto 0);
       c         : std_logic_vector(C_W-1 downto 0);   -- The window of the child
       used_c    : std_logic_vector(C_N-1 downto 0);
-      t         : natural range 0 to C_W;
+      grp       : natural range 0 to C_W / 8;         -- Stage 4 moved the window by 8 * grp
       base_c    : natural range 0 to C_B;
       f_child   : std_logic_vector(C_K-1 downto 0);   -- The children of the child
       child_any : std_logic;
@@ -313,7 +314,7 @@ architecture rtl of engine is
       r_v.slot      := (others => '0');
       r_v.c         := (others => '0');
       r_v.used_c    := (others => '0');
-      r_v.t         := 0;
+      r_v.grp       := 0;
       r_v.base_c    := 0;
       r_v.f_child   := (others => '0');
       r_v.child_any := '0';
@@ -433,27 +434,59 @@ architecture rtl of engine is
       return s_v;
    end function stage3;
 
-   -- Stage 4: The trailing ones of the window of the child, i.e. its lowest
-   -- zero, where a zero is appended beyond the window (all the squares
-   -- beyond the window are empty). And whether the child is the target of the
-   -- context, if it is at depth C_D (the target does not change during a
-   -- pass: a new target is granted while the context is in stage 1 or 2).
+   -- Stages 4 and 5 move the anchor of the child to the next empty square,
+   -- i.e. shift the window of the child right by its trailing ones (the index
+   -- of its lowest zero, where zeros are appended beyond the window: all the
+   -- squares beyond the window are empty), in two steps, so that the long
+   -- window of 16x16 (129 bits) is fast enough:
+   -- * Stage 4: by whole groups of 8 bits, to the lowest group that is not
+   --   full (a short carry chain over the groups, and a one-hot
+   --   multiplexer), grp groups.
+   -- * Stage 5: by the trailing ones of the lowest group (0 to 7), and the
+   --   anchor moves by both.
+   -- Stage 4 also finds whether the child is the target of the context, if it
+   -- is at depth C_D (the target does not change during a pass: a new target
+   -- is granted while the context is in stage 2 or 3).
+   constant C_NG : positive := C_W / 8 + 1;    -- Groups, with the appended zeros
+
    function stage4 (s : stage_t; tgt : natural) return stage_t is
-      variable s_v : stage_t;
+      variable s_v   : stage_t;
+      variable v_v   : std_logic_vector(8*C_NG+C_W-1 downto 0);  -- With zeros
+      variable nf_v  : std_logic_vector(C_NG-1 downto 0);
+      variable sel_v : std_logic_vector(C_NG-1 downto 0);
+      variable c_v   : std_logic_vector(C_W-1 downto 0);
    begin
-      s_v     := s;
-      s_v.t   := trailing_ones(s.c);
+      s_v                 := s;
+      v_v                 := (others => '0');
+      v_v(C_W-1 downto 0) := s.c;
+      for g in 0 to C_NG-1 loop
+         nf_v(g) := not (and v_v(8*g+7 downto 8*g));
+      end loop;
+      sel_v := lowest_one(nf_v);
+      c_v   := (others => '0');
+      for g in 0 to C_NG-1 loop
+         if sel_v(g) = '1' then
+            c_v := c_v or v_v(C_W-1 + 8*g downto 8*g);
+         end if;
+      end loop;
+      s_v.c   := c_v;
+      s_v.grp := to_integer(encode(sel_v, log2(C_NG) + 1));
       s_v.hit := to_sl(s.j = tgt);
       return s_v;
    end function stage4;
 
-   -- Stage 5: Move the anchor of the child to the next empty square
+   -- Stage 5: see stage 4
    function stage5 (s : stage_t) return stage_t is
       variable s_v : stage_t;
+      variable g_v : std_logic_vector(7 downto 0);
+      variable t_v : natural range 0 to 7;
    begin
-      s_v        := s;
-      s_v.c      := s.c srl s.t;
-      s_v.base_c := s.base + s.t;
+      s_v                             := s;
+      g_v                             := (others => '0');
+      g_v(minimum(C_W, 8)-1 downto 0) := s.c(minimum(C_W, 8)-1 downto 0);
+      t_v                             := trailing_ones(g_v) mod 8;  -- Not full
+      s_v.c      := s.c srl t_v;
+      s_v.base_c := s.base + 8 * s.grp + t_v;
       return s_v;
    end function stage5;
 
@@ -564,18 +597,36 @@ architecture rtl of engine is
    signal cdone_r     : std_logic_vector(C_STAGES-1 downto 0);
    signal busy_r      : std_logic_vector(C_STAGES-1 downto 0);
 
+   -- The reset, registered in each engine. The engines of a puzzle have the
+   -- same reset, so without keep, synthesis merges their registers into one,
+   -- with a fanout of thousands across the whole FPGA.
+   signal rst_d       : std_logic;
    signal rst_r       : std_logic;
+   attribute keep : string;
+   attribute keep of rst_d          : signal is "true";
+   attribute keep of rst_r          : signal is "true";
+   attribute shreg_extract : string;
+   attribute shreg_extract of rst_d : signal is "no";
+   attribute shreg_extract of rst_r : signal is "no";
+
+   -- run_i, registered in each engine (a long path from control.vhd to all
+   -- the engines otherwise), also with keep. halt_i is not registered: it
+   -- must stop the commits at once.
+   signal run_r       : std_logic := '0';
+   attribute keep of run_r : signal is "true";
 
    -- True in simulation, false in synthesis: in simulation, the stages 2 to 6
    -- are not computed for a stage without a pass (valid low). Their values
    -- are then not used (a pass that is not valid is not committed), so the
    -- result is the same, and the simulation of an engine that is paused is
    -- fast.
+   -- vsg_off whitespace_003
    constant C_SIM     : boolean := false
 -- pragma translate_off
-                                   or true
+      or true
 -- pragma translate_on
-                                   ;
+      ;
+   -- vsg_on whitespace_003
 
    function addr (id : natural; lvl : natural) return std_logic_vector is
    begin
@@ -592,11 +643,13 @@ begin
       report "At most 256 slots, 256 squares, and 31 pieces"
       severity failure;
 
-   -- The reset goes to many registers, so it is registered here first
+   -- The reset goes to many registers, so it is registered here first, twice
    p_rst : process (clk_i)
    begin
       if rising_edge(clk_i) then
-         rst_r <= rst_i;
+         rst_d <= rst_i;
+         rst_r <= rst_d;
+         run_r <= run_i;
       end if;
    end process p_rst;
 
@@ -611,10 +664,10 @@ begin
    -- register is overwritten. After a reset, stage s holds context
    -- (C_STAGES - s) mod C_STAGES.
    p_ring : process (clk_i)
-      variable ring_v : stage_vector(0 to C_STAGES-1);
-      variable s7_v   : stage_t;
-      variable may_v  : std_logic;
-      variable busy_v : std_logic_vector(C_STAGES-1 downto 0);
+      variable ring_v  : stage_vector(0 to C_STAGES-1);
+      variable s7_v    : stage_t;
+      variable may_v   : std_logic;
+      variable busy_v  : std_logic_vector(C_STAGES-1 downto 0);
       variable idle_v  : boolean := false;
       variable first_v : boolean := false;     -- The first clock cycle of the reset
    begin
@@ -683,7 +736,7 @@ begin
             ring_v(2) := stage1(ring_v(1), ds_rd, fs_rd);
 
             -- Stage 0
-            may_v := (run_i or credit_r(ring_v(0).id)) and not halt_i;
+            may_v := (run_r or credit_r(ring_v(0).id)) and not halt_i;
             if hold_i = '1' and to_integer(hold_ctx_i) = ring_v(0).id then
                may_v := '0';
             end if;

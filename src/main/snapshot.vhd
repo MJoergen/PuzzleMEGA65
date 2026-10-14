@@ -118,6 +118,10 @@ architecture rtl of snapshot is
    type state_t is (IDLE_ST, HOLD_ST, VIS_ST, PATH_ST, CLEAR_ST, PLACE_ST, NBR_ST, SEND_ST);
 
    signal state_r     : state_t := IDLE_ST;
+   signal hold_r      : std_logic := '0';
+   signal ctx_r       : natural range 0 to 255 := 0;   -- The context held and read
+   signal busy_r      : std_logic := '1';              -- busy_i(ctx_r), registered
+   signal sent_r      : std_logic := '1';              -- The buffer sent last
    signal puzzle_r    : natural range 0 to C_NUM_PUZZLES-1;
    signal cnt_r       : natural range 0 to 15;
    signal buf_r       : std_logic := '0';
@@ -133,15 +137,23 @@ architecture rtl of snapshot is
    -- The map of the pieces
    type idmap_vector is array (0 to C_MAX_SQUARES-1) of std_logic_vector(4 downto 0);
    signal idmap       : idmap_vector;
+   -- Distributed RAM, read asynchronously from the registered address. As a
+   -- block RAM, synthesis moved the computation of the address (rd_addr_r)
+   -- in front of the address register of the block RAM, a slow path.
+   attribute ram_style : string;
+   attribute ram_style of idmap : signal is "distributed";
    signal map_wr_r    : std_logic;
    signal map_addr_r  : natural range 0 to C_MAX_SQUARES-1;
    signal map_data_r  : std_logic_vector(4 downto 0);
 
-   -- Placing a piece: the square of the slot, and the offset (read from the
-   -- table, one clock cycle later)
+   -- Placing a piece: the square of the slot, and the steps of each square
+   -- (step_r, see PLACE_ST)
    signal sq_r        : natural range 0 to C_MAX_SIZE;
+   signal step_r      : natural range 0 to 3;
+   signal slot_r      : natural range 0 to C_NUM_SLOTS-1;
+   signal size_r      : natural range 0 to 31;
+   signal tab_addr_r  : natural range 0 to C_NUM_SLOTS*C_MAX_SIZE-1;
    signal offset_r    : std_logic_vector(7 downto 0);
-   signal place_r     : std_logic;
    signal piece_r     : std_logic_vector(4 downto 0);
    signal anchor_r    : std_logic_vector(8 downto 0);
 
@@ -158,11 +170,11 @@ architecture rtl of snapshot is
    signal center_r    : std_logic_vector(4 downto 0);
    signal mask_r      : std_logic_vector(7 downto 0);
 
-   signal wr_en_r     : std_logic;
+   signal wr_en_r     : std_logic := '0';
    signal wr_addr_r   : std_logic_vector(8 downto 0);
    signal wr_data_r   : std_logic_vector(12 downto 0);
-   signal latch_r     : std_logic;
-   signal valid_r     : std_logic;
+   signal latch_r     : std_logic := '0';
+   signal valid_r     : std_logic := '0';
 
 begin
 
@@ -180,15 +192,13 @@ begin
          wr_en_r   <= '0';
          latch_r   <= '0';
          valid_r   <= '0';
-         place_r   <= '0';
 
          case state_r is
             when IDLE_ST =>
                if frame_i = '1' then
                   puzzle_r   <= puzzle_i;
-                  hold_o     <= '1';
-                  hold_ctx_o <= disp_ctx_i;
-                  path_ctx_o <= disp_ctx_i;
+                  hold_r     <= '1';
+                  ctx_r      <= disp_ctx_i;
                   cnt_r      <= 0;
                   state_r    <= HOLD_ST;
                end if;
@@ -196,7 +206,7 @@ begin
             -- Wait until the context has no pass in the pipeline, and some
             -- more clock cycles for the hold to reach the engine
             when HOLD_ST =>
-               if busy_i(hold_ctx_o) = '1' then
+               if busy_r = '1' then
                   cnt_r <= 0;
                elsif cnt_r = 15 then
                   latch_r <= '1';
@@ -231,7 +241,7 @@ begin
                   path_lvl_o <= to_slv(lvl_r + 1, 5);
                   cnt_r      <= 0;
                   if lvl_r + 1 >= vis_r then
-                     hold_o     <= '0';
+                     hold_r     <= '0';
                      map_addr_r <= 0;
                      state_r    <= CLEAR_ST;
                   end if;
@@ -245,43 +255,52 @@ begin
                      map_wr_r <= '0';
                      lvl_r    <= 0;
                      sq_r     <= 0;
+                     step_r   <= 0;
                      state_r  <= PLACE_ST;
                   else
                      map_addr_r <= map_addr_r + 1;
                   end if;
                end if;
 
-            -- Each square of each placement: the offset is read from the
-            -- table in one clock cycle (place_r), and written in the next
+            -- Each square of each placement, in four steps, each of them
+            -- registered (speed does not matter here, but the timing does):
+            -- 0. take the placement, 1. the address of the offset in the
+            -- table (and the piece and the size of the slot), 2. read the
+            -- offset, 3. write the piece to the square, and go to the next
+            -- square
             when PLACE_ST =>
-               if place_r = '1' then
-                  map_wr_r   <= '1';
-                  map_addr_r <= to_integer(anchor_r + offset_r);
-                  map_data_r <= piece_r;
-               end if;
-               if lvl_r >= vis_r then
-                  if place_r = '0' then
-                     row_r    <= 0;
-                     col_r    <= 0;
-                     square_r <= 0;
-                     nbr_r    <= 0;
-                     rd_nbr_r <= 0;
-                     rd_on_r  <= '0';
-                     rd_addr_r <= 0;
-                     state_r  <= NBR_ST;
-                  end if;
-               else
-                  place_r  <= '1';
-                  offset_r <= C_OFFSET(slots_r(lvl_r) * C_MAX_SIZE + sq_r);
-                  piece_r  <= C_PIECE(slots_r(lvl_r)) + 1;
-                  anchor_r <= anchors_r(lvl_r);
-                  if sq_r + 1 = to_integer(C_SIZE(slots_r(lvl_r))) then
-                     sq_r  <= 0;
-                     lvl_r <= lvl_r + 1;
-                  else
-                     sq_r <= sq_r + 1;
-                  end if;
-               end if;
+               step_r <= (step_r + 1) mod 4;
+               case step_r is
+                  when 0 =>
+                     slot_r   <= slots_r(lvl_r);
+                     anchor_r <= anchors_r(lvl_r);
+                     if lvl_r >= vis_r then
+                        row_r     <= 0;
+                        col_r     <= 0;
+                        square_r  <= 0;
+                        nbr_r     <= 0;
+                        rd_nbr_r  <= 0;
+                        rd_on_r   <= '0';
+                        rd_addr_r <= 0;
+                        state_r   <= NBR_ST;
+                     end if;
+                  when 1 =>
+                     tab_addr_r <= slot_r * C_MAX_SIZE + sq_r;
+                     piece_r    <= C_PIECE(slot_r) + 1;
+                     size_r     <= to_integer(C_SIZE(slot_r));
+                  when 2 =>
+                     offset_r <= C_OFFSET(tab_addr_r);
+                  when 3 =>
+                     map_wr_r   <= '1';
+                     map_addr_r <= to_integer(anchor_r + offset_r);
+                     map_data_r <= piece_r;
+                     if sq_r + 1 = size_r then
+                        sq_r  <= 0;
+                        lvl_r <= lvl_r + 1;
+                     else
+                        sq_r <= sq_r + 1;
+                     end if;
+               end case;
 
             -- Each square: the square itself and its 8 neighbours. In the
             -- clock cycles 0 to 8 the address of neighbour nbr_r is set (with
@@ -293,11 +312,11 @@ begin
                dc_v := 0;
                case nbr_r is
                   when 1      => dr_v := -1;             -- N
-                  when 2      => dr_v := -1; dc_v :=  1; -- NE
-                  when 3      =>             dc_v :=  1; -- E
-                  when 4      => dr_v :=  1; dc_v :=  1; -- SE
-                  when 5      => dr_v :=  1;             -- S
-                  when 6      => dr_v :=  1; dc_v := -1; -- SW
+                  when 2      => dr_v := -1; dc_v := 1;  -- NE
+                  when 3      =>             dc_v := 1;  -- E
+                  when 4      => dr_v := 1; dc_v := 1;   -- SE
+                  when 5      => dr_v := 1;              -- S
+                  when 6      => dr_v := 1; dc_v := -1;  -- SW
                   when 7      =>             dc_v := -1; -- W
                   when 8      => dr_v := -1; dc_v := -1; -- NW
                   when others => null;
@@ -348,19 +367,32 @@ begin
 
             when SEND_ST =>
                valid_r <= '1';
-               buf_o   <= buf_r;
+               sent_r  <= buf_r;
                buf_r   <= not buf_r;
                state_r <= IDLE_ST;
          end case;
 
          if rst_i = '1' then
             state_r <= IDLE_ST;
-            hold_o  <= '0';
+            hold_r  <= '0';
             buf_r   <= '0';
-            buf_o   <= '1';
+            sent_r  <= '1';
+            latch_r <= '0';
+            valid_r <= '0';
+            wr_en_r <= '0';
          end if;
       end if;
    end process p_fsm;
+
+   -- The busy flag of the held context, registered (a 256 to 1 multiplexer).
+   -- It is one clock cycle late, and its first value in HOLD_ST may belong
+   -- to the context held before, which the 16 clock cycles of HOLD_ST cover.
+   p_busy : process (clk_i)
+   begin
+      if rising_edge(clk_i) then
+         busy_r <= busy_i(ctx_r);
+      end if;
+   end process p_busy;
 
    p_map : process (clk_i)
    begin
@@ -371,6 +403,10 @@ begin
       end if;
    end process p_map;
 
+   hold_o        <= hold_r;
+   hold_ctx_o    <= ctx_r;
+   path_ctx_o    <= ctx_r;
+   buf_o         <= sent_r;
    wr_en_o       <= wr_en_r;
    wr_addr_o     <= wr_addr_r;
    wr_data_o     <= wr_data_r;

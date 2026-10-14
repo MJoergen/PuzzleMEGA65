@@ -23,8 +23,8 @@ use work.puzzle_pkg.all;
 
 entity stats is
    generic (
-      G_CLK_FREQ  : positive;                       -- In Hz
-      G_ENGINES   : natural_vector(0 to C_NUM_PUZZLES-1)
+      G_CLK_FREQ : positive;                       -- In Hz
+      G_ENGINES  : natural_vector(0 to C_NUM_PUZZLES-1)
    );
    port (
       clk_i       : in  std_logic;
@@ -70,11 +70,17 @@ architecture rtl of stats is
    signal tenth_r       : natural range 0 to G_CLK_FREQ/10-1;
    signal time_r        : std_logic_vector(23 downto 0);
 
-   signal subtrees_r    : std_logic_vector(20 downto 0);
+   signal claimed_r     : natural range 0 to 2**21-1;
+   signal big_r         : std_logic;
+   signal big_d         : std_logic;
+   signal first_r       : natural range 0 to 255;
+   signal frontier_r    : natural range 0 to 2**21-1;
    signal recip_r       : std_logic_vector(31 downto 0);
+   signal diff_r        : integer range -255 to 2**21-1;
+   signal subtrees_r    : std_logic_vector(20 downto 0);
    signal product_r     : std_logic_vector(52 downto 0);
+   signal product_d     : std_logic_vector(52 downto 0);
    signal progress_r    : std_logic_vector( 9 downto 0);
-   signal slow_r        : std_logic_vector( 7 downto 0) := (others => '0');
 
 begin
 
@@ -127,27 +133,38 @@ begin
       end if;
    end process p_time;
 
-   -- The progress, in three clock cycles, once every 256 clock cycles (it is
-   -- shown once in each frame)
+   -- The progress, in a pipeline of registers (it is shown once in each
+   -- frame, so the latency does not matter): the constants of the puzzle and
+   -- the claims, the subtrees less the contexts, the subtrees limited to the
+   -- frontier, the product (two clock cycles, in DSPs), and the progress.
    p_progress : process (clk_i)
-      variable n_v : integer;
    begin
       if rising_edge(clk_i) then
-         slow_r <= slow_r + 1;
-         if slow_r(7 downto 2) = "000000" then
-            n_v := to_integer(claimed_i) - C_STAGES * G_ENGINES(puzzle_i);
-            if n_v < 0 then
-               n_v := 0;
-            elsif n_v > C_PUZZLES(puzzle_i).frontier then
-               n_v := C_PUZZLES(puzzle_i).frontier;
-            end if;
-            subtrees_r <= to_slv(n_v, 21);
-            recip_r    <= C_RECIP(puzzle_i);
-            product_r  <= subtrees_r * recip_r;
-            progress_r <= product_r(29 downto 20);
-            if finished_i = '1' then
-               progress_r <= to_slv(1000, 10);
-            end if;
+         claimed_r  <= to_integer(claimed_i(20 downto 0));
+         big_r      <= or claimed_i(31 downto 21);
+         first_r    <= C_STAGES * G_ENGINES(puzzle_i);
+         frontier_r <= C_PUZZLES(puzzle_i).frontier;
+         recip_r    <= C_RECIP(puzzle_i);
+
+         diff_r     <= claimed_r - first_r;
+         big_d      <= big_r;
+
+         if big_d = '1' then
+            subtrees_r <= to_slv(frontier_r, 21);
+         elsif diff_r < 0 then
+            subtrees_r <= (others => '0');
+         elsif diff_r > frontier_r then
+            subtrees_r <= to_slv(frontier_r, 21);
+         else
+            subtrees_r <= to_slv(diff_r, 21);
+         end if;
+
+         product_r  <= subtrees_r * recip_r;
+         product_d  <= product_r;
+
+         progress_r <= product_d(29 downto 20);
+         if finished_i = '1' then
+            progress_r <= to_slv(1000, 10);
          end if;
       end if;
    end process p_progress;

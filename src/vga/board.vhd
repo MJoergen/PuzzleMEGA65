@@ -58,18 +58,26 @@ architecture rtl of board is
 
    -- The sizes of each puzzle, in pixels, see geometry() in tools/render.py
    type geom_t is record
-      rows  : natural range 0 to C_MAX_ROWS;
-      cols  : natural range 0 to C_MAX_COLS;
-      cell  : natural range 0 to C_MAX_CELL;
-      half  : natural range 0 to C_MAX_CELL;
-      x0    : natural range 0 to 2047;
-      y0    : natural range 0 to 2047;
-      x1    : natural range 0 to 2047;           -- Right of the last square
-      y1    : natural range 0 to 2047;
-      g     : natural range 0 to 15;             -- Gap
-      r     : natural range 0 to 31;             -- Radius
-      bw    : natural range 0 to 15;             -- Outline
-      rim   : natural range 0 to 15;
+      rows : natural range 0 to C_MAX_ROWS;
+      cols : natural range 0 to C_MAX_COLS;
+      cell : natural range 0 to C_MAX_CELL;
+      half : natural range 0 to C_MAX_CELL;
+      x0   : natural range 0 to 2047;
+      y0   : natural range 0 to 2047;
+      x1   : natural range 0 to 2047;           -- Right of the last square
+      y1   : natural range 0 to 2047;
+      g    : natural range 0 to 15;             -- Gap
+      r    : natural range 0 to 31;             -- Radius
+      bw   : natural range 0 to 15;             -- Outline
+      rim  : natural range 0 to 15;
+      br   : natural range 0 to 31;             -- Outline and rim
+      -- The squares of the distances that stage 6 compares with, so that
+      -- they are constants (not products of the registered geometry)
+      bw2  : natural range 0 to 255;            -- bw * bw
+      br2  : natural range 0 to 1023;           -- br * br
+      r2   : natural range 0 to 1023;           -- r * r
+      rbw2 : natural range 0 to 1023;           -- (r - bw) * (r - bw)
+      rbr2 : natural range 0 to 1023;           -- (r - br) * (r - br)
    end record geom_t;
 
    type geom_vector is array (0 to C_NUM_PUZZLES-1) of geom_t;
@@ -92,6 +100,12 @@ architecture rtl of board is
          r_v(i).r    := p_v.cell / 4;
          r_v(i).bw   := maximum(2, p_v.cell / 22);
          r_v(i).rim  := maximum(1, p_v.cell / 30);
+         r_v(i).br   := r_v(i).bw + r_v(i).rim;
+         r_v(i).bw2  := r_v(i).bw * r_v(i).bw;
+         r_v(i).br2  := r_v(i).br * r_v(i).br;
+         r_v(i).r2   := r_v(i).r * r_v(i).r;
+         r_v(i).rbw2 := (r_v(i).r - r_v(i).bw) * (r_v(i).r - r_v(i).bw);
+         r_v(i).rbr2 := (r_v(i).r - r_v(i).br) * (r_v(i).r - r_v(i).br);
       end loop;
       return r_v;
    end function geometries;
@@ -284,26 +298,26 @@ begin
          id_d3    <= to_integer(rd_data_i(12 downto 8));
          if qx_v then
             a_d3   <= geom_r.cell - 1 - u_d2b;
-            s_h_d3 <= m_v(2);                     -- E
+            s_h_d3 <= m_v(2);                            -- E
          else
             a_d3   <= u_d2b;
-            s_h_d3 <= m_v(6);                     -- W
+            s_h_d3 <= m_v(6);                            -- W
          end if;
          if qy_v then
             b_d3   <= geom_r.cell - 1 - v_d2b;
-            s_v_d3 <= m_v(4);                     -- S
+            s_v_d3 <= m_v(4);                            -- S
          else
             b_d3   <= v_d2b;
-            s_v_d3 <= m_v(0);                     -- N
+            s_v_d3 <= m_v(0);                            -- N
          end if;
          if qx_v and qy_v then
-            s_d_d3 <= m_v(3);                     -- SE
+            s_d_d3 <= m_v(3);                            -- SE
          elsif qx_v then
-            s_d_d3 <= m_v(1);                     -- NE
+            s_d_d3 <= m_v(1);                            -- NE
          elsif qy_v then
-            s_d_d3 <= m_v(5);                     -- SW
+            s_d_d3 <= m_v(5);                            -- SW
          else
-            s_d_d3 <= m_v(7);                     -- NW
+            s_d_d3 <= m_v(7);                            -- NW
          end if;
       end if;
    end process p_stage4;
@@ -350,7 +364,7 @@ begin
    begin
       if rising_edge(clk_i) then
          bw_v := geom_r.bw;
-         br_v := geom_r.bw + geom_r.rim;
+         br_v := geom_r.br;
          r_v  := geom_r.r;
 
          -- Either the part is known at once, or it follows from a distance to
@@ -366,9 +380,9 @@ begin
                   lin_v := q_d4;
                elsif q_d4 < 0 then
                   lin_v := p_d4;
-               elsif d2_d4 < bw_v * bw_v then
+               elsif d2_d4 < geom_r.bw2 then
                   part_v := 1;
-               elsif d2_d4 < br_v * br_v then
+               elsif d2_d4 < geom_r.br2 then
                   part_v := 2;
                end if;
             elsif id_d4 /= 0 and s_h_d4 = '1' then
@@ -390,11 +404,11 @@ begin
                if p_d4 < 0 or q_d4 < 0 then
                   part_v := 0;
                elsif p_d4 < r_v and q_d4 < r_v then
-                  if e_d4 > r_v * r_v then
+                  if e_d4 > geom_r.r2 then
                      part_v := 0;
-                  elsif e_d4 > (r_v - bw_v) * (r_v - bw_v) then
+                  elsif e_d4 > geom_r.rbw2 then
                      part_v := 1;
-                  elsif e_d4 > (r_v - br_v) * (r_v - br_v) then
+                  elsif e_d4 > geom_r.rbr2 then
                      part_v := 2;
                   end if;
                else

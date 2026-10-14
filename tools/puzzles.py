@@ -49,7 +49,7 @@ PUZZLES = [
     dict(name='5x5',   depth=1, engines=1, nexys=1, title='5 pentominoes'),
     dict(name='1x16',  depth=2, engines=1, nexys=1, title='8 pairs of squares'),
     dict(name='1x27',  depth=2, engines=1, nexys=1, title='9 triples of squares'),
-    dict(name='16x16', depth=4, engines=2, nexys=1, title='19 large pieces'),
+    dict(name='16x16', depth=4, engines=1, nexys=1, title='19 large pieces'),
 ]
 
 # The number of pipeline stages of an engine, i.e. the number of search

@@ -27,10 +27,15 @@ set_param messaging.defaultLimit 3000
 synth_design -top $top -part $part -flatten_hierarchy rebuilt
 report_utilization -file utilization_synth.rpt
 opt_design
-place_design -directive ExtraTimingOpt
-phys_opt_design -directive AggressiveExplore
+# The default directives: the stronger ones (ExtraTimingOpt, and
+# AggressiveExplore twice) made the MEGA65 build take 30 minutes. The
+# optimization after routing is only done if it is needed.
+place_design
+phys_opt_design
 route_design
-phys_opt_design -directive AggressiveExplore
+if {[get_property SLACK [get_timing_paths -delay_type max]] < 0} {
+   phys_opt_design -directive AggressiveExplore
+}
 write_checkpoint -force $board.dcp
 report_timing_summary -file timing.rpt
 report_utilization -file utilization.rpt

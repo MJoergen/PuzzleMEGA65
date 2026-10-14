@@ -328,3 +328,124 @@ of 8 bits instead of one long carry chain.
   clocks; a wrapper registers the inputs in the source domain), bcd.vhd
   (correct digits for every 10-bit number). The proof of bcd found a small
   bug: a start in the last cycle of a conversion gave done_o; fixed.
+
+## 9. Timing closure
+
+* The second R6 build (227.37 MHz) failed by 1.15 ns, with 23,047 failing
+  endpoints. The 400 worst paths fell into a few groups:
+  * The estimate of the progress (`stats.vhd`): the constants of the puzzle
+    (selected by `puzzle_r`), a subtraction and a clamp, all in front of the
+    DSP multiplier, in one clock cycle. Now a pipeline of registers, one
+    step per clock cycle (the latency does not matter).
+  * The placement of the pieces in `snapshot.vhd`: `slot * 20 + square` as
+    the address of the table of the offsets, in one clock cycle. Now four
+    registered steps per square (a few thousand clock cycles per frame).
+  * Paths of one level of logic, from a register with 600 loads to the
+    stage registers of many engines: the engines of a puzzle have the same
+    reset, so synthesis merged their local reset registers into one, with a
+    fanout across the whole FPGA. The local reset is now two registers in
+    each engine, with `keep` (and no shift register extraction).
+  * The grant of the targets (`solver.vhd`): the count of the claims of 16
+    engines and a 32-bit addition in one clock cycle. Now two clock cycles,
+    so a claim is granted 3 clock cycles after it (instead of 2). This is
+    still before the target is needed (stage 4 of the next pass of the
+    context); engine_tb now uses the same latency, and all its traces still
+    match the model pass by pass.
+  * The done flags (`solver.vhd`, the AND of 128 flags into the control of
+    the shown context): registered once more.
+* Third R6 build: WNS -0.248 ns (234 failing endpoints, TNS -24 ns), in the
+  engines (e.g. the busy flags). But it took 30 minutes (synthesis 6,
+  placement with ExtraTimingOpt 11, phys_opt AggressiveExplore 4 + 3,
+  routing 5), twice the limit.
+* So: the MAIN clock goes down to 1080/5.0 = 216 MHz (5 % slower), and the
+  Vivado script uses the default directives, with the phys_opt after
+  routing only if the timing fails. R3 and R6 built at the same time (20
+  minutes each): R6 met timing (+0.021 ns, only after the phys_opt after
+  routing), R3 failed by 0.20 ns, in the control of the shown context
+  (`ctx_done_i(disp_r)`, a 256 to 1 multiplexer, back into `disp_r`). Now
+  registered, with a flag that skips the clock cycle after `disp_r`
+  changes (the formal proof of control still passes).
+* The 16x16 puzzle can not be searched to the end anyway, so it now has one
+  engine instead of two (about 5,000 LUTs and 4,400 registers less, and a
+  shorter build).
+* R6 alone at 216 MHz: WNS -0.09 ns, 16 minutes. The paths: the 16x16
+  engine (stage 0, the level to the read address of the stack), the busy
+  flag of the held context in `snapshot.vhd` (a 256 to 1 multiplexer,
+  now registered; the 16 clock cycles of the wait cover the one clock cycle
+  of delay, and the property in snapshot.psl now says two clock cycles),
+  and the loop from the halt through the engines back to the mode (see
+  TODO.md). So the clock went down once more, to 1080/5.25 = 205.7 MHz.
+* R6 at 205.7 MHz: WNS -0.16 ns, in yet another place: the address of the
+  neighbour in `snapshot.vhd` (NBR_ST), which synthesis had moved in front
+  of the address register of the block RAM of the map of the pieces. The
+  map (256 x 5 bits) is now distributed RAM.
+* R3 and R6 at the same time: R3 met timing (+0.013 ns, 15.5 minutes), and
+  Vivado crashed on R6 during routing ("Abnormal program termination (11)",
+  a segmentation fault; the log is kept as build/logs/vivado_r6_crash.log).
+  Run again (with the Nexys 4 DDR at the same time): R6 -0.09 ns, in the
+  16x16 engine (stage 4, the count of the trailing ones of the 129-bit
+  window), and the Nexys 4 DDR -0.11 ns, in the VGA clock domain (stage 6
+  of `board.vhd`, which squared the radius and the widths of the outline of
+  the registered geometry of the puzzle for every pixel).
+* `synth_design -retiming` did not help: R6 -0.20 ns, and synthesis took
+  6.7 instead of 5.1 minutes (the Nexys 4 DDR met timing, +0.014 ns). Not
+  used.
+* `board.vhd`: the squares are now constants in the table of the geometry
+  (board_tb: still every pixel equal).
+* The engine: the shift of the window by its trailing ones is now split
+  differently between the stages 4 and 5. Stage 4 shifts by whole groups of
+  8 bits (the lowest group that is not full: a carry chain over 17 groups
+  for 16x16, and a one-hot multiplexer), stage 5 by the trailing ones of
+  the lowest group (0 to 7). Before, stage 4 counted all the trailing ones
+  (carry chain, then a 17-way multiplexer of the count of each group, then
+  the encoder), and stage 5 shifted by up to 129.
+* engine_tb never simulated the 16x16 engine (it can not be searched to the
+  end). The model can now write the first passes of every context
+  (`trace ... <passes>`, it stops the search when all the contexts have
+  them), and engine_tb checks the first 5,000 passes of every context of
+  16x16 against them (C_PARTIAL). It passes, with the new stages 4 and 5,
+  and the engine is then idle (run_i low), so engine_tb takes 98 s.
+
+## 10. Formal verification of the snapshot, VSG, and the repository files
+
+* `formal/snapshot.psl` (written last time, never run) failed at once: some
+  registers had no initial value (so a pulse at step 0), `latch_o` is
+  registered (so it is checked against `busy_i` of the clock cycle before),
+  and a reset in the clock cycle of `latch_r` left the pulse. Fixed in the
+  RTL (initial values, the pulses cleared by the reset, one register for
+  the held context instead of two outputs) and in the properties, plus the
+  invariants k-induction needs. The properties with an implication are also
+  cover statements, and writing the board takes thousands of clock cycles,
+  so the ones about writing the board memory are plain assertions. A
+  mutation (`< squares - 1`) checks that `f_square` is not vacuous.
+* `formal/Makefile` (as MandelbrotMEGA65): `make formal` runs control,
+  cdc_data, bcd, and snapshot (prove and cover), in about 30 seconds.
+* `vsg.yml` and `CODING_STYLE.md` copied from MandelbrotMEGA65 and adapted.
+  VSG fixed the formatting by itself; by hand: a few names (`C_F_*`,
+  `char_file_t`, `to_bcd` instead of the reserved word `reference`), and
+  the `translate_off` trick of `C_SIM` is excluded from one rule. The
+  generated `puzzle_pkg.vhd` is left out, like `font_pkg.vhd`.
+* engine_tb with 5x8 takes 18 minutes (15,000 clock cycles per second), so
+  5x8 is now only simulated with `G_COUNTED=true`; it passes (with the new
+  grant latency). The other testbenches all pass: core 3.4 min, board 3.1
+  min, the rest a few seconds.
+* The CI (`.github/workflows/ci.yml`, `scripts/install-tools.sh`), README,
+  CLAUDE.md, TODO.md, and LICENSE.
+* Expected time of the whole search on the MEGA65 (the passes of the
+  slowest context from the model, times 8 clock cycles, at 205.7 MHz):
+
+  | Puzzle | Engines | Slowest context (passes) | Efficiency | Time      | C++     |
+  | ------ | ------: | -----------------------: | ---------: | --------: | ------: |
+  | 8x8    |      16 |                6,982,269 |     95.5 % |   0.272 s |  42.6 s |
+  | 6x10   |       8 |                5,820,099 |     93.8 % |   0.226 s |  14.7 s |
+  | 3x20   |       8 |               24,168,913 |     98.8 % |   0.940 s |  57.4 s |
+  | 5x8    |       4 |                  565,098 |     87.3 % |   22.0 ms |   3.9 s |
+  | 7x7    |       2 |                   74,447 |     91.8 % |    2.9 ms |  0.05 s |
+* R3 and R6 with that: R3 -0.007 ns (from `finished_r` of control.vhd,
+  through `run_o`, to the busy flags of an engine), R6 -0.37 ns, in the new
+  stage 4 (the anchor plus 8 times the encoded group, an adder after the
+  carry chain). So stage 4 now only registers the group, and stage 5 adds
+  both shifts to the anchor; and `run_i` is registered in each engine (with
+  `keep`, like the reset), so a pass starts one clock cycle after the mode
+  allows it (halt_i still acts at once, so N still stops at the solution).
+  engine_tb and core_tb pass.

@@ -96,7 +96,9 @@ begin
       variable count_v : natural;
    begin
       scans(2);
-      assert count = 0 report "A command without a key" severity failure;
+      assert count = 0
+         report "A command without a key"
+         severity failure;
 
       for k in C_KEYS'range loop
          count_v := count;
@@ -121,7 +123,8 @@ begin
       pressed(41) <= '1';
       scans(5);
       assert count = count_v + 1 and last = (C_CMD_PAUSE, "0000")
-         report "P and 5: wrong command" severity failure;
+         report "P and 5: wrong command"
+         severity failure;
       pressed(16) <= '0';
       pressed(41) <= '0';
       scans(2);
@@ -138,7 +141,9 @@ begin
          end loop;
       end loop;
       scans(5);
-      assert count = count_v report "A command for a key that is not used" severity failure;
+      assert count = count_v
+         report "A command for a key that is not used"
+         severity failure;
       report "Keys that are not used: OK";
 
       report "keys_tb: finished";

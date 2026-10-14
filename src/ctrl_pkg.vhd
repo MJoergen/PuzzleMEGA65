@@ -18,30 +18,30 @@ use ieee.std_logic_1164.all;
 package ctrl_pkg is
 
    -- The commands, see control.vhd
-   constant C_CMD_PAUSE    : std_logic_vector(2 downto 0) := "000";  -- P
-   constant C_CMD_ALL      : std_logic_vector(2 downto 0) := "001";  -- A
-   constant C_CMD_NEXT     : std_logic_vector(2 downto 0) := "010";  -- N
-   constant C_CMD_SLOW     : std_logic_vector(2 downto 0) := "011";  -- S
-   constant C_CMD_STEP     : std_logic_vector(2 downto 0) := "100";  -- O
-   constant C_CMD_PUZZLE   : std_logic_vector(2 downto 0) := "101";  -- 1 to 9
+   constant C_CMD_PAUSE  : std_logic_vector(2 downto 0) := "000";  -- P
+   constant C_CMD_ALL    : std_logic_vector(2 downto 0) := "001";  -- A
+   constant C_CMD_NEXT   : std_logic_vector(2 downto 0) := "010";  -- N
+   constant C_CMD_SLOW   : std_logic_vector(2 downto 0) := "011";  -- S
+   constant C_CMD_STEP   : std_logic_vector(2 downto 0) := "100";  -- O
+   constant C_CMD_PUZZLE : std_logic_vector(2 downto 0) := "101";  -- 1 to 9
 
    type cmd_t is record
       code   : std_logic_vector(2 downto 0);
       puzzle : std_logic_vector(3 downto 0);
    end record cmd_t;
 
-   constant C_CMD_BITS     : natural := 7;
+   constant C_CMD_BITS : natural := 7;
 
    function to_slv (c : cmd_t) return std_logic_vector;
    function to_cmd (v : std_logic_vector) return cmd_t;
 
    -- The status of the search, as shown on the screen
-   constant C_ST_PAUSED    : std_logic_vector(2 downto 0) := "000";
-   constant C_ST_ALL       : std_logic_vector(2 downto 0) := "001";  -- Searching (A)
-   constant C_ST_NEXT      : std_logic_vector(2 downto 0) := "010";  -- Searching (N)
-   constant C_ST_SLOW      : std_logic_vector(2 downto 0) := "011";  -- Searching slowly (S)
-   constant C_ST_SOLUTION  : std_logic_vector(2 downto 0) := "100";  -- Stopped at a solution
-   constant C_ST_FINISHED  : std_logic_vector(2 downto 0) := "101";  -- All solutions found
+   constant C_ST_PAUSED   : std_logic_vector(2 downto 0) := "000";
+   constant C_ST_ALL      : std_logic_vector(2 downto 0) := "001";  -- Searching (A)
+   constant C_ST_NEXT     : std_logic_vector(2 downto 0) := "010";  -- Searching (N)
+   constant C_ST_SLOW     : std_logic_vector(2 downto 0) := "011";  -- Searching slowly (S)
+   constant C_ST_SOLUTION : std_logic_vector(2 downto 0) := "100";  -- Stopped at a solution
+   constant C_ST_FINISHED : std_logic_vector(2 downto 0) := "101";  -- All solutions found
 
    -- The statistics of the search
    type stats_t is record
@@ -55,16 +55,16 @@ package ctrl_pkg is
       buf       : std_logic;                      -- The buffer of the board picture
    end record stats_t;
 
-   constant C_STATS_BITS   : natural := 48 + 32 + 36 + 10 + 24 + 3 + 4 + 1;
+   constant C_STATS_BITS : natural := 48 + 32 + 36 + 10 + 24 + 3 + 4 + 1;
 
-   constant C_STATS_INIT   : stats_t := (positions => (others => '0'),
-                                         solutions => (others => '0'),
-                                         rate      => (others => '0'),
-                                         progress  => (others => '0'),
-                                         time      => (others => '0'),
-                                         status    => C_ST_PAUSED,
-                                         puzzle    => (others => '0'),
-                                         buf       => '1');
+   constant C_STATS_INIT : stats_t := (positions => (others => '0'),
+      solutions => (others => '0'),
+      rate      => (others => '0'),
+      progress  => (others => '0'),
+      time      => (others => '0'),
+      status    => C_ST_PAUSED,
+      puzzle    => (others => '0'),
+      buf       => '1');
 
    function to_slv (s : stats_t) return std_logic_vector;
    function to_stats (v : std_logic_vector) return stats_t;

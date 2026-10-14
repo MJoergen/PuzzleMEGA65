@@ -8,7 +8,8 @@
 * build/model/<name>_<ctx>.trace for the puzzles in TRACED: every pass of
   every context, one per line: the level of the visited node, the anchor and
   the slot of its last piece, and whether it is counted, skipped, and a
-  solution (see "trace" in model.cpp).
+  solution (see "trace" in model.cpp). For the puzzles in PARTIAL only the
+  first passes of each context (16x16 can not be searched to the end).
 
 Usage: python3 tools/gen_tb_data.py   (or "make tbdata", which "make sim" runs)
 """
@@ -21,6 +22,7 @@ import puzzles
 # The puzzles that are simulated, and those of them whose traces are checked
 SIMULATED = ['5x5', '1x16', '1x27', '7x7', '5x8']
 TRACED = ['5x5', '1x16', '1x27', '7x7']
+PARTIAL = {'16x16': 5000}
 
 
 def main():
@@ -66,6 +68,9 @@ def main():
               f'first_sol => (others => 0)){end}  -- {p.name}')
         if p.name in TRACED:
             model.model(p, 'trace', 1, p.depth, os.path.join(model.BUILD, p.name))
+        if p.name in PARTIAL:
+            model.model(p, 'trace', 1, p.depth, os.path.join(model.BUILD, p.name),
+                        PARTIAL[p.name])
     w('')
     w('end package model_pkg;')
     with open(os.path.join(model.BUILD, 'model_pkg.vhd'), 'w') as f:

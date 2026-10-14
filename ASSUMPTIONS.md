@@ -82,10 +82,10 @@ here, roughly in order of importance.
 ## The repository
 
 20. The repository is created with `git init` in the folder, with the
-    history of the work as commits on `main`. No GitHub repository is
-    created and nothing is pushed: that is an outward-facing action, which I
-    leave to you. The CI workflow (`.github/workflows/ci.yml`) is there for
-    when it is pushed.
+    history of the work as commits on `main`. I did not create the GitHub
+    repository or push (an outward-facing action, left to you); you have
+    since pushed it to GitHub (MJoergen/PuzzleMEGA65), where the CI
+    workflow (`.github/workflows/ci.yml`) runs on every push.
 21. The structure, the Makefile, the coding style (`CODING_STYLE.md`,
     `vsg.yml`), and the tools follow MandelbrotMEGA65. The files from the
     C64MEGA65 core (`src/hdmi`, `src/keyboard`, `src/max10`) and

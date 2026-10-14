@@ -184,11 +184,15 @@ begin
    begin
       wait for 2 us;
       expect(1, 0, C_ST_PAUSED, "After the reset");
-      assert puzzle = 0 report "Not puzzle 1 after the reset" severity failure;
+      assert puzzle = 0
+         report "Not puzzle 1 after the reset"
+         severity failure;
 
       -- 5x5: steps
       send(C_CMD_PUZZLE, 5);
-      assert puzzle = 5 report "Not puzzle 6" severity failure;
+      assert puzzle = 5
+         report "Not puzzle 6"
+         severity failure;
       expect(1, 0, C_ST_PAUSED, "5x5 selected");
       for i in 1 to 4 loop
          send(C_CMD_STEP);
@@ -199,12 +203,14 @@ begin
       send(C_CMD_NEXT);
       wait_stop;
       assert to_integer(solutions) = 1 and status = C_ST_SOLUTION
-         report "5x5: not stopped at the first solution" severity failure;
+         report "5x5: not stopped at the first solution"
+         severity failure;
       report "5x5 next: stopped at " & integer'image(to_integer(positions)) & " positions";
       send(C_CMD_NEXT);
       wait_stop;
       assert to_integer(solutions) = 2 and status = C_ST_SOLUTION
-         report "5x5: not stopped at the second solution" severity failure;
+         report "5x5: not stopped at the second solution"
+         severity failure;
       report "5x5 next: stopped at " & integer'image(to_integer(positions)) & " positions";
 
       -- All
@@ -217,7 +223,8 @@ begin
       wait_stop;
       assert to_integer(solutions) = 1 and status = C_ST_SOLUTION and
              to_integer(positions) < C_MODEL(5).nodes
-         report "5x5: next after the end did not start again" severity failure;
+         report "5x5: next after the end did not start again"
+         severity failure;
       report "5x5 next after the end: OK, stopped at " & integer'image(to_integer(positions)) &
              " positions";
 
@@ -225,7 +232,9 @@ begin
       send(C_CMD_PUZZLE, 7);
       expect(1, 0, C_ST_PAUSED, "1x27 selected");
       send(C_CMD_SLOW);
-      assert status = C_ST_SLOW report "Not slow" severity failure;
+      assert status = C_ST_SLOW
+         report "Not slow"
+         severity failure;
       wait for 10 * C_SLOW * C_MAIN_PERIOD;
       pos_v := to_integer(positions);
       assert pos_v >= 1 + 8 and pos_v <= 1 + 11
@@ -243,7 +252,8 @@ begin
              to_integer(st_v.solutions) = C_MODEL(7).solutions and
              st_v.status = C_ST_FINISHED and to_integer(st_v.puzzle) = 7 and
              to_integer(st_v.progress) = 1000
-         report "The statistics in the VGA clock domain are wrong" severity failure;
+         report "The statistics in the VGA clock domain are wrong"
+         severity failure;
       assert text_at(text_mem, 1, 51, 27) = "        ALL SOLUTIONS FOUND"
          report "The status on the screen is """ & text_at(text_mem, 1, 51, 27) & """"
          severity failure;
@@ -305,10 +315,10 @@ begin
 
    -- Save the next frame as a picture (P6), when save is set
    p_save : process
-      type char_file is file of character;
+      type char_file_t is file of character;
       constant C_HEADER : string := "P6" & LF & "1280 1024" & LF & "255" & LF;
-      file     f_v    : char_file;
-      variable name_v : line;
+      file     f_v      : char_file_t;
+      variable name_v   : line;
    begin
       saved <= '0';
       wait until save = '1';
@@ -328,7 +338,9 @@ begin
       end loop;
       for y in 0 to 1023 loop
          for x in 0 to 1279 loop
-            assert vga_de = '1' report "Out of step with the video" severity failure;
+            assert vga_de = '1'
+               report "Out of step with the video"
+               severity failure;
             write(f_v, character'val(to_integer(vga_col(23 downto 16))));
             write(f_v, character'val(to_integer(vga_col(15 downto  8))));
             write(f_v, character'val(to_integer(vga_col( 7 downto  0))));

@@ -110,7 +110,8 @@ begin
       s_v.puzzle    := "0000";
       show(s_v);
       assert writes = 2560
-         report "Wrote " & integer'image(writes) & " characters" severity failure;
+         report "Wrote " & integer'image(writes) & " characters"
+         severity failure;
       expect( 1,  2, "Puzzle", 1);
       expect( 1,  9, "1", 0);
       expect( 1, 13, "8x8", 0);

@@ -39,30 +39,30 @@ entity control is
       G_SLOW_CYCLES : positive := 100             -- Clock cycles between slow steps
    );
    port (
-      clk_i         : in  std_logic;
-      rst_i         : in  std_logic;
+      clk_i        : in  std_logic;
+      rst_i        : in  std_logic;
 
-      cmd_valid_i   : in  std_logic;
-      cmd_i         : in  cmd_t;
+      cmd_valid_i  : in  std_logic;
+      cmd_i        : in  cmd_t;
 
       -- From the solver
-      sol_any_i     : in  std_logic;               -- Combinational, for the halt
-      sol_i         : in  natural range 0 to 32;   -- Two clock cycles later
-      sol_ctx_i     : in  natural range 0 to 255;
-      ctx_done_i    : in  std_logic_vector(0 to 255);
-      done_i        : in  std_logic;
+      sol_any_i    : in  std_logic;               -- Combinational, for the halt
+      sol_i        : in  natural range 0 to 32;   -- Two clock cycles later
+      sol_ctx_i    : in  natural range 0 to 255;
+      ctx_done_i   : in  std_logic_vector(0 to 255);
+      done_i       : in  std_logic;
 
       -- To the solver
-      puzzle_o      : out natural range 0 to C_NUM_PUZZLES-1;
-      restart_o     : out std_logic;
-      run_o         : out std_logic;
-      halt_o        : out std_logic;
-      credit_o      : out std_logic;
-      credit_ctx_o  : out natural range 0 to 255;
+      puzzle_o     : out natural range 0 to C_NUM_PUZZLES-1;
+      restart_o    : out std_logic;
+      run_o        : out std_logic;
+      halt_o       : out std_logic;
+      credit_o     : out std_logic;
+      credit_ctx_o : out natural range 0 to 255;
 
-      disp_ctx_o    : out natural range 0 to 255;  -- The context that is shown
-      status_o      : out std_logic_vector(2 downto 0);
-      searching_o   : out std_logic
+      disp_ctx_o   : out natural range 0 to 255;  -- The context that is shown
+      status_o     : out std_logic_vector(2 downto 0);
+      searching_o  : out std_logic
    );
 end entity control;
 
@@ -79,6 +79,8 @@ architecture rtl of control is
    signal solution_r  : std_logic := '0';    -- Stopped at a solution (mode "next")
    signal shown_r     : std_logic := '0';    -- ... and its context is shown
    signal disp_r      : natural range 0 to 255 := 0;
+   signal disp_done_r : std_logic := '0';    -- The shown context is done
+   signal disp_new_r  : std_logic := '1';    -- ... not valid yet, disp_r has changed
 
    -- The restart: the reset of the solver, and the time until its outputs are
    -- valid. A step that is asked for during a restart is done after it.
@@ -105,11 +107,14 @@ begin
          finished_r <= '0';
          solution_r <= '0';
          disp_r     <= 0;
+         disp_new_r <= '1';
       end procedure restart;
    begin
       if rising_edge(clk_i) then
-         credit_r  <= '0';
-         restart_r <= restart_r(0) & '0';
+         credit_r    <= '0';
+         restart_r   <= restart_r(0) & '0';
+         disp_done_r <= ctx_done_i(disp_r);
+         disp_new_r  <= '0';
          if settle_r /= 0 then
             settle_r <= settle_r - 1;
          end if;
@@ -129,8 +134,9 @@ begin
                solution_r <= '1';
             end if;
             if sol_i /= 0 and solution_r = '1' and halt_r = '1' and shown_r = '0' then
-               disp_r  <= sol_ctx_i;
-               shown_r <= '1';
+               disp_r     <= sol_ctx_i;
+               disp_new_r <= '1';
+               shown_r    <= '1';
             end if;
 
             -- The end of the search
@@ -139,8 +145,11 @@ begin
                mode_r     <= PAUSE_ST;
             end if;
 
-            -- Show another context when the shown one is done
-            if ctx_done_i(disp_r) = '1' and done_i = '0' then
+            -- Show another context when the shown one is done (the done
+            -- flag is registered, so it is not used in the clock cycle
+            -- after the shown context changes)
+            if disp_done_r = '1' and disp_new_r = '0' and done_i = '0' then
+               disp_new_r <= '1';
                if disp_r + 1 >= num_ctx(puzzle_r) then
                   disp_r <= 0;
                else
@@ -230,7 +239,8 @@ begin
    puzzle_o     <= puzzle_r;
    restart_o    <= restart_r(1);
    run_o        <= '1' when (mode_r = ALL_ST or mode_r = NEXT_ST) and finished_r = '0' and
-                            settle_r = 0 else '0';
+                            settle_r = 0 else
+ '0';
    halt_o       <= halt_r;
    credit_o     <= credit_r and not finished_r when settle_r = 0 else '0';
    credit_ctx_o <= disp_r;

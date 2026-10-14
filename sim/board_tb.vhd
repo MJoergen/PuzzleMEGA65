@@ -134,7 +134,9 @@ begin
          file_open(f_v, "build/model/board_" & integer'image(C_CASES(n)) & ".ppm", read_mode);
          readline(f_v, l_v);
          read(l_v, s_v);
-         assert s_v = "P3" report "Not a P3 file" severity failure;
+         assert s_v = "P3"
+            report "Not a P3 file"
+            severity failure;
          readline(f_v, l_v);
          read(l_v, w_v);
          read(l_v, h_v);

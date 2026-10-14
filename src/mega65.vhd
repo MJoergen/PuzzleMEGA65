@@ -93,9 +93,9 @@ architecture structural of mega65 is
    constant C_TMDS_DIVIDE   : positive := C_VGA_DIVIDE / 5;
 
    -- The divider of the MAIN clock (see clk_rst.vhd), and its frequency in Hz:
-   -- 1080 MHz / 4.75 = 227.37 MHz. See README.md (Implementation results) for
-   -- the timing.
-   constant C_MAIN_DIVIDE   : real     := 4.75;
+   -- 1080 MHz / 5.25 = 205.71 MHz. See README.md (Implementation results)
+   -- for the timing (227.37 MHz failed by 0.25 ns, 216 MHz by 0.09 ns).
+   constant C_MAIN_DIVIDE   : real     := 5.25;
    constant C_MAIN_FREQ     : natural  :=
       natural(100.0E6 / real(C_VCO_DIVIDE) * C_VCO_MULT / C_MAIN_DIVIDE);
 

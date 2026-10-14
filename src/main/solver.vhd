@@ -44,7 +44,7 @@ use work.puzzle_pkg.all;
 
 entity solver is
    generic (
-      G_ENGINES     : natural_vector(0 to C_NUM_PUZZLES-1)
+      G_ENGINES : natural_vector(0 to C_NUM_PUZZLES-1)
    );
    port (
       clk_i         : in  std_logic;
@@ -90,29 +90,29 @@ architecture structural of solver is
 
    -- The outputs of the engines of each puzzle
    type eng_t is record
-      ctx      : ctx_vector;
-      count    : std_logic_vector(0 to C_E-1);
-      sol      : std_logic_vector(0 to C_E-1);
-      claim    : std_logic_vector(0 to C_E-1);
-      busy     : std_logic_vector(0 to C_NUM_CTX-1);
-      cdone    : std_logic_vector(0 to C_NUM_CTX-1);
-      anchor   : slv9_vector(0 to C_E-1);
-      slot     : slv8_vector(0 to C_E-1);
-      vis      : slv5_vector(0 to C_E-1);
+      ctx    : ctx_vector;
+      count  : std_logic_vector(0 to C_E-1);
+      sol    : std_logic_vector(0 to C_E-1);
+      claim  : std_logic_vector(0 to C_E-1);
+      busy   : std_logic_vector(0 to C_NUM_CTX-1);
+      cdone  : std_logic_vector(0 to C_NUM_CTX-1);
+      anchor : slv9_vector(0 to C_E-1);
+      slot   : slv8_vector(0 to C_E-1);
+      vis    : slv5_vector(0 to C_E-1);
    end record eng_t;
 
    type eng_vector is array (0 to C_NUM_PUZZLES-1) of eng_t;
 
    -- The outputs of an engine that the puzzle does not have
    constant C_NO_ENG : eng_t := (ctx    => (others => (others => '0')),
-                                 count  => (others => '0'),
-                                 sol    => (others => '0'),
-                                 claim  => (others => '0'),
-                                 busy   => (others => '0'),
-                                 cdone  => (others => '1'),
-                                 anchor => (others => (others => '0')),
-                                 slot   => (others => (others => '0')),
-                                 vis    => (others => (others => '0')));
+      count  => (others => '0'),
+      sol    => (others => '0'),
+      claim  => (others => '0'),
+      busy   => (others => '0'),
+      cdone  => (others => '1'),
+      anchor => (others => (others => '0')),
+      slot   => (others => (others => '0')),
+      vis    => (others => (others => '0')));
 
    signal eng          : eng_vector;
    signal sel_r        : eng_t;
@@ -127,13 +127,22 @@ architecture structural of solver is
    signal claim_r      : std_logic_vector(0 to C_E-1);
    signal ctx_r        : natural range 0 to C_STAGES-1;
 
-   -- The grants and the counter
+   -- The claims of the last clock cycle counted, and the grants and the
+   -- counter
+   type count_vector is array (0 to C_E-1) of natural range 0 to C_E;
+   signal prefix_r     : count_vector;
+   signal n_r          : natural range 0 to C_E;
+   signal claim_d      : std_logic_vector(0 to C_E-1);
+   signal ctx_d        : natural range 0 to C_STAGES-1;
    signal grant_r      : std_logic_vector(0 to C_E-1);
    signal grant_ctx_r  : std_logic_vector(C_CTX_BITS-1 downto 0);
    signal grant_tgt_r  : slv32_vector(0 to C_E-1);
    signal claimed_r    : std_logic_vector(31 downto 0);
 
    signal path_e_r     : natural range 0 to C_E-1;
+
+   signal cdone_r      : std_logic_vector(0 to C_NUM_CTX-1);
+   signal done_r       : std_logic;
 
 begin
 
@@ -160,8 +169,8 @@ begin
 
          i_engine : entity work.engine
             generic map (
-               G_PUZZLE  => p,
-               G_FIRST   => e * C_STAGES
+               G_PUZZLE => p,
+               G_FIRST  => e * C_STAGES
             )
             port map (
                clk_i         => clk_i,
@@ -198,17 +207,15 @@ begin
 
       -- The engines that the puzzle does not have
       gen_unused : if G_ENGINES(p) < C_E generate
-         eng(p).ctx(G_ENGINES(p) to C_E-1)    <= C_NO_ENG.ctx(G_ENGINES(p) to C_E-1);
-         eng(p).count(G_ENGINES(p) to C_E-1)  <= C_NO_ENG.count(G_ENGINES(p) to C_E-1);
-         eng(p).sol(G_ENGINES(p) to C_E-1)    <= C_NO_ENG.sol(G_ENGINES(p) to C_E-1);
-         eng(p).claim(G_ENGINES(p) to C_E-1)  <= C_NO_ENG.claim(G_ENGINES(p) to C_E-1);
-         eng(p).busy(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1)  <=
-            C_NO_ENG.busy(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1);
-         eng(p).cdone(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1) <=
-            C_NO_ENG.cdone(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1);
-         eng(p).anchor(G_ENGINES(p) to C_E-1) <= C_NO_ENG.anchor(G_ENGINES(p) to C_E-1);
-         eng(p).slot(G_ENGINES(p) to C_E-1)   <= C_NO_ENG.slot(G_ENGINES(p) to C_E-1);
-         eng(p).vis(G_ENGINES(p) to C_E-1)    <= C_NO_ENG.vis(G_ENGINES(p) to C_E-1);
+         eng(p).ctx(G_ENGINES(p) to C_E-1)                  <= C_NO_ENG.ctx(G_ENGINES(p) to C_E-1);
+         eng(p).count(G_ENGINES(p) to C_E-1)                <= C_NO_ENG.count(G_ENGINES(p) to C_E-1);
+         eng(p).sol(G_ENGINES(p) to C_E-1)                  <= C_NO_ENG.sol(G_ENGINES(p) to C_E-1);
+         eng(p).claim(G_ENGINES(p) to C_E-1)                <= C_NO_ENG.claim(G_ENGINES(p) to C_E-1);
+         eng(p).busy(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1)  <= C_NO_ENG.busy(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1);
+         eng(p).cdone(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1) <= C_NO_ENG.cdone(G_ENGINES(p)*C_STAGES to C_NUM_CTX-1);
+         eng(p).anchor(G_ENGINES(p) to C_E-1)               <= C_NO_ENG.anchor(G_ENGINES(p) to C_E-1);
+         eng(p).slot(G_ENGINES(p) to C_E-1)                 <= C_NO_ENG.slot(G_ENGINES(p) to C_E-1);
+         eng(p).vis(G_ENGINES(p) to C_E-1)                  <= C_NO_ENG.vis(G_ENGINES(p) to C_E-1);
       end generate gen_unused;
 
    end generate gen_puzzle;
@@ -294,23 +301,35 @@ begin
    -- The targets
    --------------------------------------------------
 
+   -- In two clock cycles: first the number of claims of the lower engines
+   -- (prefix_r) and of all the engines (n_r), then the targets. So a claim
+   -- is granted three clock cycles after the engine claims it (claim_o),
+   -- which is early enough (see engine.vhd).
    p_claim : process (clk_i)
       variable n_v : natural range 0 to C_E;
    begin
       if rising_edge(clk_i) then
-         -- The number of claims of the lower engines is added to the counter
          n_v := 0;
          for e in 0 to C_E-1 loop
-            grant_tgt_r(e) <= claimed_r + n_v;
+            prefix_r(e) <= n_v;
             if claim_r(e) = '1' then
                n_v := n_v + 1;
             end if;
          end loop;
-         grant_r     <= claim_r;
-         grant_ctx_r <= to_slv(ctx_r, C_CTX_BITS);
-         claimed_r   <= claimed_r + n_v;
+         n_r       <= n_v;
+         claim_d   <= claim_r;
+         ctx_d     <= ctx_r;
+
+         for e in 0 to C_E-1 loop
+            grant_tgt_r(e) <= claimed_r + prefix_r(e);
+         end loop;
+         grant_r     <= claim_d;
+         grant_ctx_r <= to_slv(ctx_d, C_CTX_BITS);
+         claimed_r   <= claimed_r + n_r;
 
          if rst_i = '1' then
+            claim_d   <= (others => '0');
+            n_r       <= 0;
             grant_r   <= (others => '0');
             claimed_r <= to_slv(C_STAGES * G_ENGINES(puzzle_i), 32);
          end if;
@@ -332,15 +351,25 @@ begin
       end if;
    end process p_path;
 
+   -- The done flags, registered once more (the AND of all of them is a long
+   -- path)
+   p_done : process (clk_i)
+   begin
+      if rising_edge(clk_i) then
+         cdone_r <= sel_r.cdone;
+         done_r  <= and sel_r.cdone;
+      end if;
+   end process p_done;
+
    p_outputs : process (all)
    begin
       busy_o     <= (others => '0');
       ctx_done_o <= (others => '1');
       busy_o(0 to C_NUM_CTX-1)     <= sel_r.busy;
-      ctx_done_o(0 to C_NUM_CTX-1) <= sel_r.cdone;
+      ctx_done_o(0 to C_NUM_CTX-1) <= cdone_r;
    end process p_outputs;
 
    claimed_o <= claimed_r;
-   done_o    <= and sel_r.cdone;
+   done_o    <= done_r;
 
 end architecture structural;

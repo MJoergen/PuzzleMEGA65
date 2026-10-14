@@ -26,7 +26,7 @@ use work.ctrl_pkg.all;
 
 entity status is
    generic (
-      G_HELP    : string                             -- The keys, at most 76 characters
+      G_HELP : string                             -- The keys, at most 76 characters
    );
    port (
       clk_i     : in  std_logic;
@@ -76,16 +76,16 @@ architecture rtl of status is
    constant C_TEMPLATE : template_t := template;
 
    -- The fields: the row, the first column, the width, and the kind
-   constant F_NONE   : natural := 0;
-   constant F_NUM    : natural := 1;   -- The number of the puzzle (1 to 9)
-   constant F_NAME   : natural := 2;   -- The size, e.g. "8x8"
-   constant F_TITLE  : natural := 3;   -- The pieces
-   constant F_STATUS : natural := 4;
-   constant F_POS    : natural := 5;   -- Positions considered
-   constant F_SOL    : natural := 6;   -- Solutions found
-   constant F_RATE   : natural := 7;   -- Positions per second
-   constant F_PROG   : natural := 8;   -- Progress, in per mille, as 100.0
-   constant F_TIME   : natural := 9;   -- Time, in tenths of seconds, as 12.3
+   constant C_F_NONE   : natural := 0;
+   constant C_F_NUM    : natural := 1;   -- The number of the puzzle (1 to 9)
+   constant C_F_NAME   : natural := 2;   -- The size, e.g. "8x8"
+   constant C_F_TITLE  : natural := 3;   -- The pieces
+   constant C_F_STATUS : natural := 4;
+   constant C_F_POS    : natural := 5;   -- Positions considered
+   constant C_F_SOL    : natural := 6;   -- Solutions found
+   constant C_F_RATE   : natural := 7;   -- Positions per second
+   constant C_F_PROG   : natural := 8;   -- Progress, in per mille, as 100.0
+   constant C_F_TIME   : natural := 9;   -- Time, in tenths of seconds, as 12.3
 
    type field_t is record
       row   : natural;
@@ -97,15 +97,15 @@ architecture rtl of status is
    type field_vector is array (natural range <>) of field_t;
 
    constant C_FIELDS : field_vector := (
-      ( 1,  9,  1, F_NUM),
-      ( 1, 13,  5, F_NAME),
-      ( 1, 20, 30, F_TITLE),
-      ( 1, 51, 27, F_STATUS),
-      (26, 23, 19, F_POS),
-      (26, 63, 13, F_SOL),
-      (27, 28, 14, F_RATE),
-      (27, 69,  5, F_PROG),
-      (28, 31,  9, F_TIME));
+      ( 1,  9,  1, C_F_NUM),
+      ( 1, 13,  5, C_F_NAME),
+      ( 1, 20, 30, C_F_TITLE),
+      ( 1, 51, 27, C_F_STATUS),
+      (26, 23, 19, C_F_POS),
+      (26, 63, 13, C_F_SOL),
+      (27, 28, 14, C_F_RATE),
+      (27, 69,  5, C_F_PROG),
+      (28, 31,  9, C_F_TIME));
 
    -- The texts of the status (see ctrl_pkg.vhd), right-aligned
    type status_vector is array (0 to 7) of string(1 to 27);
@@ -155,9 +155,9 @@ architecture rtl of status is
    -- field: digits with commas between the groups of three, and the leading
    -- zeros (and their commas) blank
    function number_char (d : std_logic_vector; k : natural) return character is
-      variable d_v   : std_logic_vector(4*C_DIGITS-1 downto 0);
-      variable n_v   : natural;                    -- The significant digits
-      variable i_v   : natural;
+      variable d_v : std_logic_vector(4*C_DIGITS-1 downto 0);
+      variable n_v : natural;                      -- The significant digits
+      variable i_v : natural;
    begin
       d_v := d;
       n_v := 1;
@@ -184,9 +184,9 @@ architecture rtl of status is
    -- point is at the position 1 from the right, and there is always a digit
    -- before it
    function decimal_char (d : std_logic_vector; k : natural) return character is
-      variable d_v   : std_logic_vector(4*C_DIGITS-1 downto 0);
-      variable n_v   : natural;
-      variable i_v   : natural;
+      variable d_v : std_logic_vector(4*C_DIGITS-1 downto 0);
+      variable n_v : natural;
+      variable i_v : natural;
    begin
       d_v := d;
       n_v := 2;
@@ -224,8 +224,8 @@ begin
       ); -- i_bcd
 
    p_fsm : process (clk_i)
-      variable kind_v : natural range 0 to 9;
-      variable index_v : natural range 0 to 31;
+      variable kind_v   : natural range 0 to 9;
+      variable index_v  : natural range 0 to 31;
       variable from_r_v : natural range 0 to 31;
    begin
       if rising_edge(clk_i) then
@@ -266,7 +266,7 @@ begin
 
             -- Each character: find the field at the position
             when WRITE_ST =>
-               kind_v   := F_NONE;
+               kind_v   := C_F_NONE;
                index_v  := 0;
                from_r_v := 0;
                for f in C_FIELDS'range loop
@@ -313,16 +313,16 @@ begin
          c_v   := tmpl_d;
          col_v := "01";
          case kind_d is
-            when F_NUM    =>
+            when C_F_NUM    =>
                c_v   := character'val(49 + p_v);
                col_v := "00";
-            when F_NAME   =>
+            when C_F_NAME   =>
                c_v   := C_PUZZLES(p_v).name(index_d + 1);
                col_v := "00";
-            when F_TITLE  =>
+            when C_F_TITLE  =>
                c_v   := C_PUZZLES(p_v).title(index_d + 1);
                col_v := "00";
-            when F_STATUS =>
+            when C_F_STATUS =>
                c_v   := C_STATUS(s_v)(index_d + 1);
                col_v := "00";
                if stats_r.status = C_ST_FINISHED then
@@ -330,19 +330,19 @@ begin
                elsif stats_r.status = C_ST_SOLUTION then
                   col_v := "11";
                end if;
-            when F_POS    =>
+            when C_F_POS    =>
                c_v   := number_char(digits_r(0), from_r_d);
                col_v := "00";
-            when F_SOL    =>
+            when C_F_SOL    =>
                c_v   := number_char(digits_r(1), from_r_d);
                col_v := "00";
-            when F_RATE   =>
+            when C_F_RATE   =>
                c_v   := number_char(digits_r(2), from_r_d);
                col_v := "00";
-            when F_PROG   =>
+            when C_F_PROG   =>
                c_v   := decimal_char(digits_r(3), from_r_d);
                col_v := "00";
-            when F_TIME   =>
+            when C_F_TIME   =>
                c_v   := decimal_char(digits_r(4), from_r_d);
                col_v := "00";
             when others   =>

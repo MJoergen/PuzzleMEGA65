@@ -113,7 +113,7 @@ package puzzle_pkg is
 
    -- The number of engines of each puzzle on the MEGA65 and on the Nexys 4 DDR,
    -- see solver.vhd, mega65.vhd, and nexys4ddr.vhd
-   constant C_ENGINES_MEGA65 : natural_vector(0 to C_NUM_PUZZLES-1) := (16, 8, 8, 4, 2, 1, 1, 1, 2);
+   constant C_ENGINES_MEGA65 : natural_vector(0 to C_NUM_PUZZLES-1) := (16, 8, 8, 4, 2, 1, 1, 1, 1);
    constant C_ENGINES_NEXYS  : natural_vector(0 to C_NUM_PUZZLES-1) := (4, 2, 2, 1, 1, 1, 1, 1, 1);
 
    -- The slots of all the puzzles

@@ -1,20 +1,25 @@
 -- This is a self-checking testbench of the search engine (engine.vhd). It
 -- runs the whole search of several puzzles, each by its own engine with its 8
--- contexts, with run_i high all the time, and checks it against the model
+-- contexts, with run_i high (until it is done), and checks it against the model
 -- (tools/model.cpp) with one engine. The testbench hands out the targets like
--- the solver: a claim is granted in the next clock cycle, with the next value
--- of a counter that starts at 8. It checks:
+-- the solver: a claim is granted three clock cycles later, with the next
+-- value of a counter that starts at 8. It checks:
 -- * For the puzzles in C_TRACED, every committed pass of every context: the
 --   level of the visited node, the anchor and the slot of its last piece, and
 --   whether it is counted, skipped, and a solution, against the trace of the
 --   model (build/model/<name>_<ctx>.trace, see tools/gen_tb_data.py). After
 --   the search, every trace must be used up.
+-- * For the puzzles in C_PARTIAL (16x16, which can not be searched to the
+--   end), the same for the first passes of every context (the trace of the
+--   model has only those).
 -- * For all the puzzles in C_TRACED and C_COUNTED: the number of nodes
 --   (the counted passes plus the root) and of solutions (model_pkg.vhd), and
 --   that the search takes 8 clock cycles for each pass of the slowest
 --   context, plus at most the latency of the pipeline.
 -- The puzzles are given by their index (key - 1): 4 = 7x7, 5 = 5x5, 6 =
--- 1x16, 7 = 1x27, and 3 = 5x8 (15.8 million nodes, the slowest part).
+-- 1x16, 7 = 1x27, 8 = 16x16, and 3 = 5x8 (15.8 million nodes, about 18
+-- minutes, so it is only simulated with G_COUNTED=true: "make run TB=engine
+-- GENERICS=G_COUNTED=true"; "make sim" leaves it out).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -28,7 +33,7 @@ use work.model_pkg.all;
 
 entity engine_tb is
    generic (
-      G_COUNTED : boolean := true                        -- Also simulate C_COUNTED
+      G_COUNTED : boolean := false                       -- Also simulate C_COUNTED
    );
 end entity engine_tb;
 
@@ -37,14 +42,15 @@ architecture simulation of engine_tb is
    type int_vector is array (natural range <>) of natural;
 
    constant C_TRACED  : int_vector := (5, 6, 7, 4);
+   constant C_PARTIAL : int_vector := (0 => 8);
    constant C_COUNTED : int_vector := (0 => 3);
 
    function puzzles return int_vector is
    begin
       if G_COUNTED then
-         return C_TRACED & C_COUNTED;
+         return C_TRACED & C_PARTIAL & C_COUNTED;
       end if;
-      return C_TRACED;
+      return C_TRACED & C_PARTIAL;
    end function puzzles;
 
    constant C_PUZZLES_TB : int_vector := puzzles;
@@ -69,9 +75,13 @@ begin
    gen_dut : for n in C_PUZZLES_TB'range generate
       constant C_PUZ    : natural  := C_PUZZLES_TB(n);
       constant C_NAME   : string   := C_PUZZLES(C_PUZ).name;
-      constant C_TRACE  : boolean  := n < C_TRACED'length;
+      constant C_TRACE  : boolean  := n < C_TRACED'length + C_PARTIAL'length;
+      constant C_PART   : boolean  := n >= C_TRACED'length and C_TRACE;
 
       signal ctx        : std_logic_vector(2 downto 0);
+      type ctx_vector is array (1 to 2) of std_logic_vector(2 downto 0);
+      signal claim_d    : std_logic_vector(1 to 2) := (others => '0');
+      signal ctx_d      : ctx_vector;
       signal commit     : std_logic;
       signal count      : std_logic;
       signal sol        : std_logic;
@@ -100,14 +110,17 @@ begin
 
    begin
 
-      -- The counter of the targets
+      -- The counter of the targets, with the latency of the solver: three
+      -- clock cycles from the claim to the grant
       p_grant : process (clk)
          variable tgt_v : natural := C_STAGES;
       begin
          if rising_edge(clk) then
-            grant <= claim;
-            if claim = '1' then
-               grant_ctx <= ctx;
+            claim_d <= claim_d(2) & claim;
+            ctx_d   <= (ctx_d(2), ctx);
+            grant   <= claim_d(1);
+            if claim_d(1) = '1' then
+               grant_ctx <= ctx_d(1);
                grant_tgt <= to_slv(tgt_v, 32);
                tgt_v     := tgt_v + 1;
             end if;
@@ -116,13 +129,13 @@ begin
 
       i_engine : entity work.engine
          generic map (
-            G_PUZZLE  => C_PUZ,
-            G_FIRST   => 0
+            G_PUZZLE => C_PUZ,
+            G_FIRST  => 0
          )
          port map (
             clk_i         => clk,
             rst_i         => rst,
-            run_i         => '1',
+            run_i         => not finished(n),  -- Idle when done (16x16)
             halt_i        => '0',
             credit_i      => '0',
             credit_ctx_i  => "000",
@@ -170,7 +183,7 @@ begin
                wait until rst = '0';
                loop
                   wait until rising_edge(clk);
-                  if commit = '1' and to_integer(ctx) = x then
+                  if commit = '1' and to_integer(ctx) = x and not (C_PART and endfile(f_v)) then
                      assert not endfile(f_v)
                         report C_NAME & " ctx " & integer'image(x) & ": more passes than the model"
                         severity failure;
@@ -217,6 +230,13 @@ begin
       begin
          wait until rst = '0';
          wait until rising_edge(clk);
+         -- A partial trace: only the passes of the trace are checked
+         if C_PART then
+            wait until trace_done = (trace_done'range => '1');
+            report C_NAME & ": the first passes of every context, OK";
+            finished(n) <= '1';
+            wait;
+         end if;
          while done = '0' loop
             if count = '1' then
                nodes_v := nodes_v + 1;
