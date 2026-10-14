@@ -115,14 +115,35 @@ architecture rtl of snapshot is
    constant C_SIZE    : size_vector   := sizes;
    constant C_OFFSET  : offset_vector := offsets;
 
+   -- The fields of C_PUZZLES that are used here, for a puzzle that is a
+   -- signal: as a loop over the puzzles, so each read of C_PUZZLES has a
+   -- constant index (GHDL synthesis, used for the formal verification, reads
+   -- an array of records with a signal as the index wrongly)
+   function puzzle_field (p : natural; f : natural) return natural is
+      variable r_v : natural := 0;
+   begin
+      for i in 0 to C_NUM_PUZZLES-1 loop
+         if p = i then
+            case f is
+               when 0      => r_v := C_PUZZLES(i).rows;
+               when 1      => r_v := C_PUZZLES(i).cols;
+               when others => r_v := C_PUZZLES(i).first_slot;
+            end case;
+         end if;
+      end loop;
+      return r_v;
+   end function puzzle_field;
+
    type state_t is (IDLE_ST, HOLD_ST, VIS_ST, PATH_ST, CLEAR_ST, PLACE_ST, NBR_ST, SEND_ST);
 
    signal state_r     : state_t := IDLE_ST;
    signal hold_r      : std_logic := '0';
-   signal ctx_r       : natural range 0 to 255 := 0;   -- The context held and read
-   signal busy_r      : std_logic := '1';              -- busy_i(ctx_r), registered
-   signal sent_r      : std_logic := '1';              -- The buffer sent last
-   signal puzzle_r    : natural range 0 to C_NUM_PUZZLES-1;
+   signal ctx_r       : natural range 0 to 255 := 0;             -- The context held and read
+   signal busy_r      : std_logic := '1';                        -- busy_i(ctx_r), registered
+   signal sent_r      : std_logic := '1';                        -- The buffer sent last
+   signal puzzle_r    : natural range 0 to C_NUM_PUZZLES-1 := 0;
+   signal rows_r      : natural range 0 to C_MAX_ROWS := 1;      -- The size of the puzzle
+   signal cols_r      : natural range 0 to C_MAX_COLS := 1;
    signal cnt_r       : natural range 0 to 15;
    signal buf_r       : std_logic := '0';
 
@@ -179,7 +200,6 @@ architecture rtl of snapshot is
 begin
 
    p_fsm : process (clk_i)
-      variable p_v   : puzzle_t;
       variable dr_v  : integer;
       variable dc_v  : integer;
       variable r_v   : integer;
@@ -187,7 +207,6 @@ begin
       variable id_v  : std_logic_vector(4 downto 0);
    begin
       if rising_edge(clk_i) then
-         p_v       := C_PUZZLES(puzzle_r);
          map_wr_r  <= '0';
          wr_en_r   <= '0';
          latch_r   <= '0';
@@ -197,6 +216,8 @@ begin
             when IDLE_ST =>
                if frame_i = '1' then
                   puzzle_r   <= puzzle_i;
+                  rows_r     <= puzzle_field(puzzle_i, 0);
+                  cols_r     <= puzzle_field(puzzle_i, 1);
                   hold_r     <= '1';
                   ctx_r      <= disp_ctx_i;
                   cnt_r      <= 0;
@@ -235,7 +256,7 @@ begin
                if cnt_r = 5 then
                   if lvl_r < vis_r then
                      anchors_r(lvl_r) <= path_anchor_i;
-                     slots_r(lvl_r)   <= p_v.first_slot + to_integer(path_slot_i);
+                     slots_r(lvl_r)   <= puzzle_field(puzzle_r, 2) + to_integer(path_slot_i);
                   end if;
                   lvl_r      <= lvl_r + 1;
                   path_lvl_o <= to_slv(lvl_r + 1, 5);
@@ -323,8 +344,8 @@ begin
                end case;
                r_v      := row_r + dr_v;
                c_v      := col_r + dc_v;
-               rd_on_r  <= to_sl(r_v >= 0 and r_v < p_v.rows and c_v >= 0 and c_v < p_v.cols);
-               rd_addr_r <= (square_r + dr_v * p_v.cols + dc_v) mod C_MAX_SQUARES;
+               rd_on_r  <= to_sl(r_v >= 0 and r_v < rows_r and c_v >= 0 and c_v < cols_r);
+               rd_addr_r <= (square_r + dr_v * cols_r + dc_v) mod C_MAX_SQUARES;
                rd_nbr_r <= nbr_r;
 
                -- The neighbour of the last clock cycle
@@ -352,9 +373,9 @@ begin
                   wr_en_r   <= '1';
                   wr_addr_r <= buf_r & to_slv(square_r, 8);
                   wr_data_r <= center_r & mask_r;
-                  if col_r = p_v.cols-1 then
+                  if col_r = cols_r-1 then
                      col_r <= 0;
-                     if row_r = p_v.rows-1 then
+                     if row_r = rows_r-1 then
                         state_r <= SEND_ST;
                      else
                         row_r <= row_r + 1;

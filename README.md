@@ -147,9 +147,9 @@ Vivado 2025.1, one build at a time with 8 threads (`make <board>`):
 
 | Board        | MAIN clock | WNS       | LUTs            | Registers       | BRAM | Build time |
 | ------------ | ---------: | --------: | --------------: | --------------: | ---: | ---------: |
-| MEGA65 R6    | 196.4 MHz  | +0.119 ns | 64,473 (48.2 %) | 84,499 (31.6 %) | 29   | 13.3 min   |
-| MEGA65 R3    | 196.4 MHz  | +0.073 ns | 64,600 (48.3 %) | 84,641 (31.6 %) | 29   | 14.8 min   |
-| Nexys 4 DDR  | 154.3 MHz  | +0.129 ns | 22,989 (36.3 %) | 28,730 (22.7 %) | 15   | 6.3 min    |
+| MEGA65 R6    | 196.4 MHz  | +0.109 ns | 64,524 (48.2 %) | 84,541 (31.6 %) | 29   | 13.4 min   |
+| MEGA65 R3    | 196.4 MHz  | +0.041 ns | 64,559 (48.2 %) | 84,642 (31.6 %) | 29   | 14.4 min   |
+| Nexys 4 DDR  | 154.3 MHz  | +0.083 ns | 22,962 (36.2 %) | 28,741 (22.7 %) | 15   | 5.2 min    |
 
 The VGA clock is 108 MHz (1280x1024 @ 60 Hz). The engines are small (8x8:
 about 1,550 LUTs and 1,950 registers; 16x16: about 5,000 LUTs and 4,400

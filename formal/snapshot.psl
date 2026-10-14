@@ -15,6 +15,10 @@ vunit i_snapshot(snapshot(rtl))
    -- The design starts in reset
    f_reset : assume {rst_i};
 
+   -- The puzzle is one of the puzzles (the formal model does not limit a
+   -- natural to its range)
+   f_puzzle_i : assume always (puzzle_i < C_NUM_PUZZLES);
+
 
    -----------------------------
    -- ASSERTIONS
@@ -31,14 +35,28 @@ vunit i_snapshot(snapshot(rtl))
    -- and then the other buffer (buf_r) is written
    f_alternate : assert always {sent_r /= buf_r};
 
+   -- The puzzle of the picture is one of the puzzles, and its size (registered
+   -- with it) is not empty. (The properties use the registered size, not the
+   -- table C_PUZZLES: with a signal as the index, the formal tools do not
+   -- read the table correctly in a property.)
+   f_puzzle : assert always (puzzle_r < C_NUM_PUZZLES);
+   f_size : assert always (rows_r >= 1 and rows_r <= C_MAX_ROWS and cols_r >= 1 and
+      cols_r <= C_MAX_COLS and rows_r * cols_r <= C_MAX_SQUARES);
+
    -- The squares written are on the board of the puzzle
    f_square : assert always (wr_en_o = '0' or rst_i = '1' or
-      to_integer(wr_addr_o(7 downto 0)) < C_PUZZLES(puzzle_r).squares);
+      to_integer(wr_addr_o(7 downto 0)) < rows_r * cols_r);
+
+   -- The invariants that f_square needs (for k-induction): while the
+   -- neighbours are compared, the square is on the board, and it is the
+   -- square of the row and the column
+   f_nbr_row : assert always (state_r /= NBR_ST or row_r < rows_r);
+   f_nbr_col : assert always (state_r /= NBR_ST or col_r < cols_r);
+   f_nbr_square : assert always (state_r /= NBR_ST or square_r = row_r * cols_r + col_r);
 
    -- The statistics are taken while the context is held and had no pass in
    -- the pipeline (two clock cycles before, as busy_i and latch_o are
-   -- registered), so
-   -- they belong to the position of the picture
+   -- registered), so they belong to the position of the picture
    f_latch : assert always {latch_o = '1'} |-> {hold_r = '1' and state_r = VIS_ST};
    f_latch_busy : assert always {hold_r = '1' and busy_i(ctx_r) = '1' and rst_i = '0'} |=>
       {true; latch_o = '0'};

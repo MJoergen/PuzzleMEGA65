@@ -518,3 +518,31 @@ reports and the bit-file); with the phys_opt after routing they would be
 testbenches pass in 9.9 minutes (core_tb 9.9, board_tb 3, engine_tb 1.7).
 The full engine_tb with 5x8: passes (18 minutes). `make pictures`: 45
 minutes; the pictures in doc/ are from this version.
+
+## 13. The first CI run
+
+* Pushed to GitHub (you asked for it). The first CI run: VSG, the data of
+  the testbenches, and all the simulations passed, but `make formal`
+  failed: `f_square` of snapshot.psl failed the induction with the tools of
+  the CI (OSS CAD Suite 2026-10-01, Yosys 0.69), and passed with mine
+  (Yosys 0.56). I had suspected that its proof was too easy: no invariant
+  tied the square to the row and the column. Installed the tools of the CI
+  with scripts/install-tools.sh to reproduce it.
+* Adding the invariants showed two problems of the formal model, not of
+  the design:
+  * A natural signal is not limited to its range (puzzle_r was 10, rows_r
+    18), so the properties now say it (f_puzzle, f_size), and the input
+    puzzle_i is assumed to be one of the puzzles.
+  * GHDL synthesis (both versions) reads `C_PUZZLES(puzzle_i).rows`, an
+    array of records with a signal as the index, wrongly: puzzle 8 gave
+    16, puzzle 0 gave 0 instead of 8 (in a property it was wrong too).
+    Vivado reads it correctly (the simulations and the boards use it).
+    snapshot.vhd now reads the fields with a loop over the puzzles (each
+    read with a constant index), and registers the size of the puzzle with
+    it (rows_r, cols_r), which the properties use.
+* Now `make formal` passes with both tool sets, and a mutation of
+  f_square (one square less) fails, so it is not vacuous.
+* After this change of snapshot.vhd: core_tb passes; the builds again, one
+  at a time: R6 +0.109 ns in 13.4 minutes, R3 +0.041 ns in 14.4 minutes
+  (this time with the phys_opt after routing: -0.136 ns after routing),
+  Nexys 4 DDR +0.083 ns in 5.2 minutes. The README has these numbers.

@@ -59,6 +59,12 @@ MEGA65 (R3 and R6, XC7A200T, 1280x1024 on VGA and HDMI) and the Nexys 4 DDR
   and done flags): assigning a `downto` vector to a `to` slice reverses it
   silently (this froze the picture during a search once).
 * Test the display while a search runs (mode A), not only when paused.
+* Formal (GHDL synthesis): an array of records indexed by a signal (e.g.
+  `C_PUZZLES(puzzle_i).rows`) is read wrongly; use a loop with constant
+  indices (see `puzzle_field` in snapshot.vhd). A natural is not limited to
+  its range in the formal model: assert the range. The CI uses newer tools
+  (`scripts/install-tools.sh`, in `~/.cache/puzzle-tools`): run
+  `make formal` with them before pushing a change of the properties.
 * GHDL uses the mcode backend; external names in testbenches must be
   declared in a process after the instance. GHDL can not analyze
   `clk_rst.vhd` and the top levels (unisim).
