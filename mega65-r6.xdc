@@ -92,5 +92,10 @@ set_max_delay -datapath_only -from [get_clocks -of_objects [get_pins i_mega65/i_
 set_false_path -from [get_ports {reset_button_i kb_io2_i}]
 
 # Configuration Bank Voltage Select
-set_property CFGBVS VCCO [current_design]
-set_property CONFIG_VOLTAGE 3.3 [current_design]
+set_property CONFIG_VOLTAGE                  3.3   [current_design]
+set_property CFGBVS                          VCCO  [current_design]
+set_property BITSTREAM.GENERAL.COMPRESS      TRUE  [current_design]
+set_property BITSTREAM.CONFIG.CONFIGRATE     66    [current_design]
+set_property CONFIG_MODE                     SPIx4 [current_design]
+set_property BITSTREAM.CONFIG.SPI_32BIT_ADDR YES   [current_design]
+set_property BITSTREAM.CONFIG.SPI_BUSWIDTH   4     [current_design]
